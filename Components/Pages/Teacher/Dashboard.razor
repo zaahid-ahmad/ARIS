@@ -1,0 +1,61 @@
+﻿@page "/teacher/dashboard"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@attribute [Authorize(Roles = "Teacher")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<h2>Teacher Dashboard</h2>
+<p>Welcome, @currentUser?.Fullname</p>
+
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Attendance</h5>
+                <p class="card-text">Capture today's attendance.</p>
+                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/teacher/attendance")'>Go</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Marks</h5>
+                <p class="card-text">Capture and view learner marks.</p>
+                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/teacher/marks")'>Go</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning mb-3">
+            <div class="card-body">
+                <h5 class="card-title">At-Risk Learners</h5>
+                <p class="card-text">View flagged learners.</p>
+                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/teacher/atrisk")'>Go</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<button class="btn btn-secondary mt-3" @onclick="Logout">Logout</button>
+
+@code {
+    private User? currentUser;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+            currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
+    }
+
+    private void Logout()
+    {
+        Navigation.NavigateTo("/Account/Logout", forceLoad: true);
+    }
+}

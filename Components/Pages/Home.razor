@@ -1,0 +1,28 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@attribute [Authorize]
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<p>Redirecting...</p>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            if (user.IsInRole("Admin"))
+                Navigation.NavigateTo("/admin/dashboard");
+            else if (user.IsInRole("Teacher"))
+                Navigation.NavigateTo("/teacher/dashboard");
+            else if (user.IsInRole("Learner"))
+                Navigation.NavigateTo("/learner/dashboard");
+        }
+    }
+}

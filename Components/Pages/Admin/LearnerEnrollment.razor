@@ -1,0 +1,190 @@
+﻿@page "/admin/enrollment"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject NavigationManager Navigation
+
+<h2>Learner Enrollment</h2>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+<div class="row mb-4">
+    <div class="col-md-5">
+        <div class="mb-3">
+            <label>Select Subject</label>
+            <select class="form-control" @bind="selectedSubjectId">
+                <option value="0">-- Select Subject --</option>
+                @foreach (var subject in subjects)
+                {
+                    <option value="@subject.SubjectId">
+                        @subject.Name (Grade @subject.Grade)
+                    </option>
+                }
+            </select>
+            <button class="btn btn-primary mt-2" @onclick="LoadEnrollments">Load Learners</button>
+        </div>
+    </div>
+</div>
+
+@if (selectedSubjectId > 0)
+{
+    <div class="row">
+        <div class="col-md-6">
+            <h4>Enrolled Learners</h4>
+            @if (enrolledLearners.Count == 0)
+            {
+                <p class="text-muted">No learners enrolled yet.</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Grade</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var learner in enrolledLearners)
+                        {
+                            <tr>
+                                <td>@learner.User?.Fullname</td>
+                                <td>@learner.Grade</td>
+                                <td>
+                                    <button class="btn btn-danger btn-sm"
+                                            @onclick="() => UnenrollLearner(learner)">
+                                        Remove
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+        <div class="col-md-6">
+            <h4>Available Learners</h4>
+            @if (availableLearners.Count == 0)
+            {
+                <p class="text-muted">All learners are already enrolled.</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Grade</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var learner in availableLearners)
+                        {
+                            <tr>
+                                <td>@learner.User?.Fullname</td>
+                                <td>@learner.Grade</td>
+                                <td>
+                                    <button class="btn btn-success btn-sm"
+                                            @onclick="() => EnrollLearner(learner)">
+                                        Enroll
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private List<Subject> subjects = new();
+    private List<Learner> enrolledLearners = new();
+    private List<Learner> availableLearners = new();
+    private int selectedSubjectId = 0;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        subjects = await DbContext.Subjects
+            .AsNoTracking()
+            .Include(s => s.Teacher)
+            .ThenInclude(t => t.User)
+            .ToListAsync();
+    }
+
+    private async Task LoadEnrollments()
+    {
+        if (selectedSubjectId == 0) return;
+
+        enrolledLearners = await DbContext.LearnerSubjects
+            .AsNoTracking()
+            .Where(ls => ls.SubjectId == selectedSubjectId)
+            .Include(ls => ls.Learner)
+            .ThenInclude(l => l.User)
+            .Select(ls => ls.Learner)
+            .ToListAsync();
+
+        var enrolledIds = enrolledLearners.Select(l => l.LearnerId).ToList();
+
+        availableLearners = await DbContext.Learners
+            .AsNoTracking()
+            .Include(l => l.User)
+            .Where(l => !enrolledIds.Contains(l.LearnerId))
+            .ToListAsync();
+    }
+
+    private async Task EnrollLearner(Learner learner)
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        var enrollment = new LearnerSubject
+        {
+            LearnerId = learner.LearnerId,
+            SubjectId = selectedSubjectId,
+            AcademicYear = DateTime.Now.Year
+        };
+
+        DbContext.LearnerSubjects.Add(enrollment);
+        await DbContext.SaveChangesAsync();
+
+        successMessage = $"{learner.User?.Fullname} enrolled successfully!";
+        await LoadEnrollments();
+    }
+
+    private async Task UnenrollLearner(Learner learner)
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        var enrollment = await DbContext.LearnerSubjects
+            .FirstOrDefaultAsync(ls =>
+                ls.LearnerId == learner.LearnerId &&
+                ls.SubjectId == selectedSubjectId);
+
+        if (enrollment != null)
+        {
+            DbContext.LearnerSubjects.Remove(enrollment);
+            await DbContext.SaveChangesAsync();
+            successMessage = $"{learner.User?.Fullname} removed successfully!";
+            await LoadEnrollments();
+        }
+    }
+}

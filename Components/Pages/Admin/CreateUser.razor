@@ -1,0 +1,123 @@
+﻿@page "/admin/users/create"
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@attribute [Authorize(Roles="Admin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject NavigationManager Navigation
+@inject AppDbContext DbContext
+
+<h2>Create New User</h2>
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+<div class="row">
+    <div class="col-md-5">
+        <div class="mb-3">
+            <label>Full Name</label>
+            <input class="form-control" @bind="fullName" />
+        </div>
+        <div class="mb-3">
+            <label>Email</label>
+            <input class="form-control" @bind="email" />
+        </div>
+        <div class="mb-3">
+            <label>Password</label>
+            <input type="password" class="form-control" @bind="password" />
+        </div>
+        <div class="mb-3">
+            <label>Role</label>
+            <select class="form-control" @bind="role">
+                <option value="">-- Select Role --</option>
+                <option value="Teacher">Teacher</option>
+                <option value="Learner">Learner</option>
+            </select>
+        </div>
+        <button class="btn btn-primary" @onclick="CreateUserAsync">Create User</button>
+        <button class="btn btn-secondary ms-2" @onclick='() => Navigation.NavigateTo("/admin/users")'>Cancel</button>
+    </div>
+</div>
+
+@code {
+    private string fullName = string.Empty;
+    private string email = string.Empty;
+    private string password = string.Empty;
+    private string role = string.Empty;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    private async Task CreateUserAsync()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(fullName) ||
+            string.IsNullOrWhiteSpace(email) ||
+            string.IsNullOrWhiteSpace(password) ||
+            string.IsNullOrWhiteSpace(role))
+        {
+            errorMessage = "Please fill in all fields.";
+            return;
+        }
+
+        //email validation
+        var emailValid = new System.ComponentModel.DataAnnotations.EmailAddressAttribute();
+        if (!emailValid.IsValid(email))
+        {
+            errorMessage = "Please enter a valid email address.";
+            return;
+        }
+
+        var user = new User
+        {
+            UserName = email,
+            Email = email,
+            Fullname = fullName,
+            Role = role,
+            IsActive = true,
+            EmailConfirmed = true
+        };
+
+        var result = await UserManager.CreateAsync(user, password);
+
+        if (result.Succeeded)
+        {
+            await UserManager.AddToRoleAsync(user, role);
+
+            if (role == "Teacher")
+            {
+                var teacher = new Teacher { UserId = user.Id };
+                DbContext.Teachers.Add(teacher);
+                await DbContext.SaveChangesAsync();
+            }
+            else if (role == "Learner")
+            {
+                var learner = new Learner
+                {
+                    UserId = user.Id,
+                    Grade = 10,
+                    ClassName = "Unassigned",
+                    EnrollmentYear = DateTime.Now.Year
+                };
+                DbContext.Learners.Add(learner);
+                await DbContext.SaveChangesAsync();
+            }
+
+            successMessage = $"{role} account created successfully!";
+            fullName = email = password = role = string.Empty;
+        }
+        else
+        {
+            errorMessage = string.Join(", ", result.Errors.Select(e => e.Description));
+        }
+    }
+}

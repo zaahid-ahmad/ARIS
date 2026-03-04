@@ -1,0 +1,218 @@
+﻿@page "/admin/subjects"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject AppDbContext DbContext
+@inject NavigationManager Navigation
+
+<h2>Subject Management</h2>
+<button class="btn btn-primary mb-3"
+        @onclick="() => showCreateForm = true">
+    + Add New Subject
+</button>
+@if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Subject Name</th>
+                <th>Grade</th>
+                <th>Teacher</th>
+                <th>Year</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var subject in subjects)
+            {
+                <tr>
+                    <td>@subject.Name</td>
+                    <td>@subject.Grade</td>
+                    <td>@subject.Teacher?.User?.Fullname</td>
+                    <td>@subject.AcademicYear</td>
+                    <td>
+                        <button class="btn btn-danger btn-sm"
+                                @onclick="() => DeleteSubject(subject)">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (showCreateForm)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New Subject</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label>Subject Name</label>
+                        <input class="form-control" @bind="subjectName" />
+                    </div>
+                    <div class="mb-3">
+                        <label>Grade</label>
+                        <select class="form-control" @bind="grade">
+                            <option value="10">Grade 10</option>
+                            <option value="11">Grade 11</option>
+                            <option value="12">Grade 12</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>Assign Teacher</label>
+                        <select class="form-control" @bind="teacherId">
+                            <option value="0">-- Select Teacher --</option>
+                            @if (teachers != null)
+                            {
+                                @foreach (var teacher in teachers)
+                                {
+                                    <option value="@teacher.TeacherId">
+                                        @teacher.User?.Fullname
+                                    </option>
+                                }
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>Academic Year</label>
+                        <input type="number" class="form-control" @bind="academicYear" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" @onclick="CreateSubject">Create</button>
+                    <button class="btn btn-secondary"
+                            @onclick="() => showCreateForm = false">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (subjectToDelete != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Delete</h5>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete <strong>@subjectToDelete.Name</strong>?</p>
+                    <p class="text-danger">This cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-danger" @onclick="ConfirmDelete">Yes, Delete</button>
+                    <button class="btn btn-secondary" @onclick="CancelDelete">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+
+@code {
+    private List<Subject>? subjects;
+    private List<Teacher>? teachers;
+    private Subject? subjectToDelete;
+    private bool showCreateForm = false;
+
+    private string subjectName = string.Empty;
+    private int grade = 10;
+    private int teacherId = 0;
+    private int academicYear = DateTime.Now.Year;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        subjects = await DbContext.Subjects
+            .AsNoTracking()
+            .Include(s => s.Teacher)
+            .ThenInclude(t => t.User)
+            .ToListAsync();
+
+        teachers = await DbContext.Teachers
+            .AsNoTracking()
+            .Include(t => t.User)
+            .ToListAsync();
+    }
+
+    private async Task CreateSubject()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(subjectName) || teacherId == 0)
+        {
+            errorMessage = "Please fill in all fields.";
+            return;
+        }
+
+        var subject = new Subject
+        {
+            Name = subjectName,
+            Grade = grade,
+            TeacherId = teacherId,
+            AcademicYear = academicYear
+        };
+
+        DbContext.Subjects.Add(subject);
+        await DbContext.SaveChangesAsync();
+
+        successMessage = "Subject created successfully!";
+        subjectName = string.Empty;
+        teacherId = 0;
+        showCreateForm = false;
+        await LoadData();
+    }
+
+    private void DeleteSubject(Subject subject)
+    {
+        subjectToDelete = subject;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (subjectToDelete != null)
+        {
+            DbContext.Subjects.Remove(subjectToDelete);
+            await DbContext.SaveChangesAsync();
+            subjectToDelete = null;
+            await LoadData();
+        }
+    }
+
+    private void CancelDelete()
+    {
+        subjectToDelete = null;
+    }
+}

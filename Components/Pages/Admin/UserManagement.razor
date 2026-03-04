@@ -1,0 +1,186 @@
+﻿@page "/admin/users"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject NavigationManager Navigation
+
+
+<h2>User Mangement</h2>
+<button class="btn btn-primary mb-3" @onclick='() => Navigation.NavigateTo("admin/users/create")'> +Add New User </button>
+@if (userToDelete != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Delete</h5>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete <strong>@userToDelete.Fullname</strong>?</p>
+                    <p class="text-danger">This cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-danger" @onclick="ConfirmDelete">Yes, Delete</button>
+                    <button class="btn btn-secondary" @onclick="CancelDelete">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+@if (userToReset != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Reset Password for @userToReset.Fullname</h5>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(resetMessage))
+                    {
+                        <div class="alert alert-success">@resetMessage</div>
+                    }
+                    <label>New Password</label>
+                    <input type="password" class="form-control" @bind="newPassword" />
+                    <small class="text-muted">
+                        Username/Email: @userToReset.Email
+                    </small>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-warning"
+                            @onclick="ConfirmResetPassword">
+                        Reset Password
+                    </button>
+                    <button class="btn btn-secondary"
+                            @onclick="CancelReset">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if(users == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="mb-3 mt-3 d-flex gap-2">
+        <input class="form-control" placeholder="Search by name or email..."
+               @bind="searchTerm"/>
+        <button class="btn btn-primary" @onclick="SearchUsers">Search</button>
+        <button class="btn btn-secondary" @onclick="ClearSearch">Clear</button>
+    </div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Active</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var user in FilteredUsers)
+            {
+                <tr>
+                    <td>@user.Fullname</td>
+                    <td>@user.Email</td>
+                    <td>@user.Role</td>
+                    <td>@(user.IsActive ? "Yes":"No")</td>
+                    <td>
+                        <button class="btn btn-danger btn-sm"
+                                @onclick="() => DeleteUser(user)">
+                            Delete
+                        </button>
+                        <button class="btn btn-warning btn-sm ms-1"
+                                @onclick="() => ShowResetPassword(user)">
+                            Reset Password
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+@code {
+    private List<User>? users;
+    private User? userToDelete;
+    private User? userToReset;
+    private string newPassword = string.Empty;
+    private string searchTerm = string.Empty;
+    private string resetMessage = string.Empty;
+
+    private IEnumerable<User> FilteredUsers => users?
+        .Where(u => string.IsNullOrWhiteSpace(searchTerm) ||
+            u.Fullname.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+            u.Email!.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+        ?? Enumerable.Empty<User>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        users = await Task.Run(() => UserManager.Users.ToList());
+    }
+
+    private void DeleteUser(User user)
+    {
+        userToDelete = user;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (userToDelete != null)
+        {
+            await UserManager.DeleteAsync(userToDelete);
+            users = await Task.Run(() => UserManager.Users.ToList());
+            userToDelete = null;
+        }
+    }
+
+    private void CancelDelete()
+    {
+        userToDelete = null;
+    }
+
+    private void ShowResetPassword(User user)
+    {
+        userToReset = user;
+        newPassword = string.Empty;
+        resetMessage = string.Empty;
+    }
+
+    private async Task ConfirmResetPassword()
+    {
+        if (userToReset != null && !string.IsNullOrWhiteSpace(newPassword))
+        {
+            var token = await UserManager.GeneratePasswordResetTokenAsync(userToReset);
+            var result = await UserManager.ResetPasswordAsync(userToReset, token, newPassword);
+            resetMessage = result.Succeeded ? "Password reset successfully!" :
+                string.Join(", ", result.Errors.Select(e => e.Description));
+            if (result.Succeeded) userToReset = null;
+        }
+    }
+
+    private void CancelReset()
+    {
+        userToReset = null;
+        resetMessage = string.Empty;
+    }
+    
+    private void SearchUsers()
+    {
+        StateHasChanged();
+    }
+
+    private void ClearSearch()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+}
