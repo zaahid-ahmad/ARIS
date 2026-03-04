@@ -3,20 +3,20 @@
   "WorkspaceRootPath": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|c:\\users\\zaahi\\onedrive\\documents\\aris1\\aris1\\components\\pages\\admin\\subjectmanagement.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}",
-      "RelativeMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|solutionrelative:components\\pages\\admin\\subjectmanagement.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|c:\\users\\zaahi\\onedrive\\documents\\aris1\\aris1\\components\\pages\\admin\\learnerenrollment.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}",
-      "RelativeMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|solutionrelative:components\\pages\\admin\\learnerenrollment.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|c:\\users\\zaahi\\onedrive\\documents\\aris1\\aris1\\components\\pages\\admin\\dashboard.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}",
       "RelativeMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|solutionrelative:components\\pages\\admin\\dashboard.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|c:\\users\\zaahi\\onedrive\\documents\\aris1\\aris1\\components\\pages\\admin\\usermanagement.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}",
       "RelativeMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|solutionrelative:components\\pages\\admin\\usermanagement.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|c:\\users\\zaahi\\onedrive\\documents\\aris1\\aris1\\components\\pages\\admin\\subjectmanagement.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|solutionrelative:components\\pages\\admin\\subjectmanagement.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|c:\\users\\zaahi\\onedrive\\documents\\aris1\\aris1\\components\\pages\\admin\\learnerenrollment.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|solutionrelative:components\\pages\\admin\\learnerenrollment.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{033847B2-6ACF-9017-FEB9-4665B656D3D9}|ARIS1.csproj|c:\\users\\zaahi\\onedrive\\documents\\aris1\\aris1\\components\\pages\\admin\\createuser.razor||{40D31677-CBC0-4297-A9EF-89D907823A98}",
@@ -30,15 +30,11 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 2,
+          "SelectedChildIndex": 3,
           "Children": [
             {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{3ae79031-e1bc-11d0-8f78-00a0c9110057}"
-            },
-            {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 3,
               "Title": "LearnerEnrollment.razor",
               "DocumentMoniker": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\Components\\Pages\\Admin\\LearnerEnrollment.razor",
               "RelativeDocumentMoniker": "Components\\Pages\\Admin\\LearnerEnrollment.razor",
@@ -46,44 +42,43 @@
               "RelativeToolTip": "Components\\Pages\\Admin\\LearnerEnrollment.razor",
               "ViewState": "AgIAAGMAAAAAAAAAAAAAAAgAAAAeAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000759|",
-              "WhenOpened": "2026-03-03T15:43:41.256Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-03-03T15:43:41.256Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 2,
               "Title": "SubjectManagement.razor",
               "DocumentMoniker": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\Components\\Pages\\Admin\\SubjectManagement.razor",
               "RelativeDocumentMoniker": "Components\\Pages\\Admin\\SubjectManagement.razor",
               "ToolTip": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\Components\\Pages\\Admin\\SubjectManagement.razor",
               "RelativeToolTip": "Components\\Pages\\Admin\\SubjectManagement.razor",
-              "ViewState": "AgIAAL0AAAAAAAAAAAAAAMgAAAAFAAAAAAAAAA==",
+              "ViewState": "AgIAAA8AAAAAAAAAAAAAAMgAAAAFAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000759|",
               "WhenOpened": "2026-03-03T15:25:36.794Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 1,
               "Title": "UserManagement.razor",
               "DocumentMoniker": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\Components\\Pages\\Admin\\UserManagement.razor",
               "RelativeDocumentMoniker": "Components\\Pages\\Admin\\UserManagement.razor",
               "ToolTip": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\Components\\Pages\\Admin\\UserManagement.razor",
               "RelativeToolTip": "Components\\Pages\\Admin\\UserManagement.razor",
-              "ViewState": "AgIAAHEAAAAAAAAAAAAAAIMAAAAFAAAAAAAAAA==",
+              "ViewState": "AgIAAJgAAAAAAAAAAAAAAIMAAAAFAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000759|",
               "WhenOpened": "2026-03-03T13:49:34.573Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 0,
               "Title": "Dashboard.razor",
               "DocumentMoniker": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\Components\\Pages\\Admin\\Dashboard.razor",
               "RelativeDocumentMoniker": "Components\\Pages\\Admin\\Dashboard.razor",
               "ToolTip": "C:\\Users\\zaahi\\OneDrive\\Documents\\ARIS1\\ARIS1\\Components\\Pages\\Admin\\Dashboard.razor",
               "RelativeToolTip": "Components\\Pages\\Admin\\Dashboard.razor",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAC8AAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAACQAAAAAAAAAAAAAAC4AAABSAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000759|",
               "WhenOpened": "2026-03-03T11:28:04.215Z",
               "EditorCaption": ""
@@ -98,8 +93,7 @@
               "RelativeToolTip": "Components\\Pages\\Admin\\CreateUser.razor",
               "ViewState": "AgIAAF4AAAAAAAAAAAAiwGsAAAAtAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000759|",
-              "WhenOpened": "2026-03-03T15:29:51.459Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-03-03T15:29:51.459Z"
             }
           ]
         }
