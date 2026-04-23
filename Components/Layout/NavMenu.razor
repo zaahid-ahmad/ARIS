@@ -2,7 +2,7 @@
 @inject NavigationManager NavigationManager
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="">ARIS1</a>
+        <a class="navbar-brand" href="">ARIS</a>
     </div>
 </div>
 
@@ -34,6 +34,13 @@
                         </button>
                     </form>
                 </div>
+                <AuthorizeView Roles="Learner" Context="learnerContext">
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="/learner/profile">
+                            <span class="bi bi-person-check-fill-nav-menu" aria-hidden="true"></span> My Profile
+                        </NavLink>
+                    </div>
+                </AuthorizeView>
             </Authorized>
             <NotAuthorized>
                 <div class="nav-item px-3">

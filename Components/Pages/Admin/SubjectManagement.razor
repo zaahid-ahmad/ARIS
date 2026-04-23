@@ -15,6 +15,7 @@
         @onclick="() => showCreateForm = true">
     + Add New Subject
 </button>
+
 @if (subjects == null)
 {
     <p>Loading...</p>
@@ -40,6 +41,10 @@ else
                     <td>@subject.Teacher?.User?.Fullname</td>
                     <td>@subject.AcademicYear</td>
                     <td>
+                        <button class="btn btn-primary btn-sm ms-1"
+                                @onclick="() => ManageAssessmentTypes(subject)">
+                            Assessment Types
+                        </button>
                         <button class="btn btn-danger btn-sm"
                                 @onclick="() => DeleteSubject(subject)">
                             Delete
@@ -50,6 +55,7 @@ else
         </tbody>
     </table>
 }
+
 @if (!string.IsNullOrEmpty(errorMessage))
 {
     <div class="alert alert-danger">@errorMessage</div>
@@ -133,12 +139,293 @@ else
     </div>
 }
 
+@if (showAssessmentTypes)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        Assessment Types for @selectedSubject?.Name
+                    </h5>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(assessmentTypeError))
+                    {
+                        <div class="alert alert-danger">@assessmentTypeError</div>
+                    }
+                    @if (!string.IsNullOrEmpty(assessmentTypeSuccess))
+                    {
+                        <div class="alert alert-success">@assessmentTypeSuccess</div>
+                    }
+
+                    <h6>Existing Types</h6>
+                    @if (assessmentTypes.Count == 0)
+                    {
+                        <p class="text-muted">No assessment types yet.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Weight</th>
+                                    <th>Term</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var type in assessmentTypes)
+                                {
+                                    <tr>
+                                        <td>@type.Name</td>
+                                        <td>@type.WeightPercentage%</td>
+                                        <td>Term @type.Term</td>
+                                        <td>
+                                            <button class="btn btn-danger btn-sm"
+                                                    @onclick="() => DeleteAssessmentType(type)">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+
+                    <hr />
+                    <h6>Add New Type</h6>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label>Name</label>
+                            <input class="form-control" @bind="newTypeName"
+                                   placeholder="e.g. Term Test" />
+                        </div>
+                        <div class="col-md-3">
+                            <label>Weight %</label>
+                            <input type="number" class="form-control"
+                                   @bind="newTypeWeight" />
+                        </div>
+                        <div class="col-md-3">
+                            <label>Term</label>
+                            <select class="form-control" @bind="newTypeTerm">
+                                <option value="1">Term 1</option>
+                                <option value="2">Term 2</option>
+                                <option value="3">Term 3</option>
+                                <option value="4">Term 4</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button class="btn btn-success w-100"
+                                    @onclick="CreateAssessmentType">
+                                Add
+                            </button>
+                        </div>
+                    </div>
+                    <hr />
+                    <h6>Assessments</h6>
+                    @if (!string.IsNullOrEmpty(assessmentError))
+                    {
+                        <div class="alert alert-danger">@assessmentError</div>
+                    }
+                    @if (!string.IsNullOrEmpty(assessmentSuccess))
+                    {
+                        <div class="alert alert-success">@assessmentSuccess</div>
+                    }
+
+                    @if (assessments.Count == 0)
+                    {
+                        <p class="text-muted">No assessments yet.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Type</th>
+                                    <th>Max Mark</th>
+                                    <th>Term</th>
+                                    <th>Date</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var assessment in assessments)
+                                {
+                                    <tr>
+                                        <td>@assessment.Title</td>
+                                        <td>@assessment.AssessmentType?.Name</td>
+                                        <td>@assessment.MaxMark</td>
+                                        <td>Term @assessment.Term</td>
+                                        <td>@assessment.Date.ToString("dd MMM yyyy")</td>
+                                        <td>
+                                            <button class="btn btn-info btn-sm me-1"
+                                                    @onclick="() => SelectAssessmentForQuestions(assessment)">
+                                                Questions
+                                            </button>
+                                            <button class="btn btn-danger btn-sm"
+                                                    @onclick="() => DeleteAssessment(assessment)">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+
+                    <hr />
+                    <h6>Add New Assessment</h6>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label>Title</label>
+                            <input class="form-control" @bind="newAssessmentTitle"
+                                   placeholder="e.g. Term 1 Test" />
+                        </div>
+                        <div class="col-md-3">
+                            <label>Type</label>
+                            <select class="form-control" @bind="newAssessmentTypeId">
+                                <option value="0">-- Select Type --</option>
+                                @foreach (var type in assessmentTypes)
+                                {
+                                    <option value="@type.AssessmentTypeId">@type.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label>Max Mark</label>
+                            <input type="number" class="form-control" @bind="newAssessmentMaxMark" />
+                        </div>
+                        <div class="col-md-1">
+                            <label>Term</label>
+                            <select class="form-control" @bind="newAssessmentTerm">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label>Date</label>
+                            <input type="date" class="form-control" @bind="newAssessmentDate" />
+                        </div>
+                        <div class="col-md-1 d-flex align-items-end">
+                            <button class="btn btn-success w-100"
+                                    @onclick="CreateAssessment">
+                                Add
+                            </button>
+                        </div>
+                    </div>
+                    <hr />
+                    <h6>Questions for Selected Assessment</h6>
+
+                    @if (selectedAssessment != null)
+                    {
+                        @if (!string.IsNullOrEmpty(questionError))
+                        {
+                            <div class="alert alert-danger">@questionError</div>
+                        }
+                        @if (!string.IsNullOrEmpty(questionSuccess))
+                        {
+                            <div class="alert alert-success">@questionSuccess</div>
+                        }
+
+                        <p><strong>Assessment:</strong> @selectedAssessment.Title (Max: @selectedAssessment.MaxMark)</p>
+
+                        @if (assessmentQuestions.Count == 0)
+                        {
+                            <p class="text-muted">No questions yet.</p>
+                        }
+                        else
+                        {
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Q#</th>
+                                        <th>Topic</th>
+                                        <th>Max Mark</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var question in assessmentQuestions)
+                                    {
+                                        <tr>
+                                            <td>@question.QuestionNumber</td>
+                                            <td>@question.Topic</td>
+                                            <td>@question.MaxMark</td>
+                                            <td>
+                                                <button class="btn btn-danger btn-sm"
+                                                        @onclick="() => DeleteQuestion(question)">
+                                                    Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                            <p class="text-muted">
+                                Total Marks: <strong>@assessmentQuestions.Sum(q => q.MaxMark)</strong> /
+                                Assessment Max: <strong>@selectedAssessment.MaxMark</strong>
+                            </p>
+                        }
+
+                        <button class="btn btn-primary btn-sm mb-3"
+                                @onclick='() => showCreateQuestion = !showCreateQuestion'>
+                            @(showCreateQuestion ? "Cancel" : "+ Add Question")
+                        </button>
+
+                        @if (showCreateQuestion)
+                        {
+                            <div style="border: 1px solid #ddd; padding: 15px; background-color: #f9f9f9;">
+                                <h6>Add New Question</h6>
+                                <div class="row">
+                                    <div class="col-md-2">
+                                        <label>Q#</label>
+                                        <input type="number" class="form-control" @bind="newQuestionNumber" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label>Topic</label>
+                                        <input class="form-control" @bind="newQuestionTopic" />
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label>Max Mark</label>
+                                        <input type="number" class="form-control" @bind="newQuestionMaxMark" />
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button class="btn btn-success w-100" @onclick="CreateQuestion">Add</button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="text-muted">Click "Questions" button on an assessment above to add questions.</p>
+                    }
+
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary"
+                            @onclick='() => showAssessmentTypes = false'>
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @code {
     private List<Subject>? subjects;
     private List<Teacher>? teachers;
     private Subject? subjectToDelete;
+    private Subject? selectedSubject;
+    private List<AssessmentType> assessmentTypes = new();
     private bool showCreateForm = false;
+    private bool showAssessmentTypes = false;
 
     private string subjectName = string.Empty;
     private int grade = 10;
@@ -146,6 +433,30 @@ else
     private int academicYear = DateTime.Now.Year;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
+
+    private string newTypeName = string.Empty;
+    private float newTypeWeight = 0;
+    private int newTypeTerm = 1;
+    private string assessmentTypeError = string.Empty;
+    private string assessmentTypeSuccess = string.Empty;
+
+    private List<Assessment> assessments = new();
+    private string newAssessmentTitle = string.Empty;
+    private float newAssessmentMaxMark = 100;
+    private int newAssessmentTerm = 1;
+    private int newAssessmentTypeId = 0;
+    private DateTime newAssessmentDate = DateTime.Today;
+    private string assessmentError = string.Empty;
+    private string assessmentSuccess = string.Empty;
+
+    private Assessment? selectedAssessment;
+    private List<AssessmentQuestion> assessmentQuestions = new();
+    private bool showCreateQuestion = false;
+    private int newQuestionNumber = 1;
+    private string newQuestionTopic = string.Empty;
+    private float newQuestionMaxMark = 0;
+    private string questionError = string.Empty;
+    private string questionSuccess = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -214,5 +525,221 @@ else
     private void CancelDelete()
     {
         subjectToDelete = null;
+    }
+
+    private async Task LoadAssessments()
+    {
+        assessments = await DbContext.Assessments
+            .AsNoTracking()
+            .Include(a => a.AssessmentType)
+            .Where(a => a.SubjectId == selectedSubject!.SubjectId)
+            .ToListAsync();
+    }
+
+    private async Task CreateAssessment()
+    {
+        assessmentError = string.Empty;
+        assessmentSuccess = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(newAssessmentTitle) || newAssessmentTypeId == 0)
+        {
+            assessmentError = "Please fill in all fields.";
+            return;
+        }
+
+        var assessment = new Assessment
+        {
+            Title = newAssessmentTitle,
+            SubjectId = selectedSubject!.SubjectId,
+            AssessmentTypeId = newAssessmentTypeId,
+            MaxMark = newAssessmentMaxMark,
+            Term = newAssessmentTerm,
+            Date = newAssessmentDate
+        };
+
+        DbContext.Assessments.Add(assessment);
+        await DbContext.SaveChangesAsync();
+
+        assessmentSuccess = "Assessment created!";
+        newAssessmentTitle = string.Empty;
+        newAssessmentTypeId = 0;
+        await LoadAssessments();
+    }
+
+    private async Task DeleteAssessment(Assessment assessment)
+    {
+        try
+        {
+            var assessmentToDelete = await DbContext.Assessments.FindAsync(assessment.AssessmentId);
+            if (assessmentToDelete != null)
+            {
+                var marks = await DbContext.LearnerMarks
+                    .Where(m => m.AssessmentId == assessment.AssessmentId)
+                    .ToListAsync();
+                DbContext.LearnerMarks.RemoveRange(marks);
+                DbContext.Assessments.Remove(assessmentToDelete);
+                await DbContext.SaveChangesAsync();
+                assessmentSuccess = "Assessment deleted!";
+            }
+            await LoadAssessments();
+        }
+        catch (Exception ex)
+        {
+            assessmentError = "Error deleting: " + ex.Message;
+        }
+    }
+
+    private async Task ManageAssessmentTypes(Subject subject)
+    {
+        selectedSubject = subject;
+        showAssessmentTypes = true;
+        await LoadAssessmentTypes();
+        await LoadAssessments();
+    }
+
+    private async Task LoadAssessmentTypes()
+    {
+        assessmentTypes = await DbContext.AssessmentTypes
+            .AsNoTracking()
+            .Where(at => at.SubjectId == selectedSubject!.SubjectId)
+            .ToListAsync();
+    }
+
+    private async Task CreateAssessmentType()
+    {
+        assessmentTypeError = string.Empty;
+        assessmentTypeSuccess = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(newTypeName) || newTypeWeight <= 0)
+        {
+            assessmentTypeError = "Please fill in all fields.";
+            return;
+        }
+
+        var type = new AssessmentType
+        {
+            SubjectId = selectedSubject!.SubjectId,
+            Name = newTypeName,
+            WeightPercentage = newTypeWeight,
+            Term = newTypeTerm
+        };
+
+        DbContext.AssessmentTypes.Add(type);
+        await DbContext.SaveChangesAsync();
+
+        assessmentTypeSuccess = "Assessment type created!";
+        newTypeName = string.Empty;
+        newTypeWeight = 0;
+        await LoadAssessmentTypes();
+    }
+
+    private async Task DeleteAssessmentType(AssessmentType type)
+    {
+        try
+        {
+            var typeToDelete = await DbContext.AssessmentTypes.FindAsync(type.AssessmentTypeId);
+            if (typeToDelete != null)
+            {
+                var relatedAssessments = await DbContext.Assessments
+                    .Where(a => a.AssessmentTypeId == type.AssessmentTypeId)
+                    .ToListAsync();
+
+                foreach (var assessment in relatedAssessments)
+                {
+                    var marks = await DbContext.LearnerMarks
+                        .Where(m => m.AssessmentId == assessment.AssessmentId)
+                        .ToListAsync();
+                    DbContext.LearnerMarks.RemoveRange(marks);
+                }
+
+                DbContext.Assessments.RemoveRange(relatedAssessments);
+                DbContext.AssessmentTypes.Remove(typeToDelete);
+                await DbContext.SaveChangesAsync();
+                assessmentTypeSuccess = "Assessment type deleted!";
+            }
+            await LoadAssessmentTypes();
+            await LoadAssessments();
+        }
+        catch (Exception ex)
+        {
+            assessmentTypeError = "Error deleting: " + ex.Message;
+        }
+    }
+
+    private void SelectAssessmentForQuestions(Assessment assessment)
+    {
+        selectedAssessment = assessment;
+        showCreateQuestion = false;
+        LoadAssessmentQuestions();
+    }
+
+    private async Task LoadAssessmentQuestions()
+    {
+        if (selectedAssessment == null) return;
+    
+        assessmentQuestions = await DbContext.AssessmentQuestions
+            .AsNoTracking()
+            .Where(q => q.AssessmentId == selectedAssessment.AssessmentId)
+            .OrderBy(q => q.QuestionNumber)
+            .ToListAsync();
+    }
+
+    private async Task CreateQuestion()
+    {
+        questionError = string.Empty;
+        questionSuccess = string.Empty;
+
+        if (selectedAssessment == null || string.IsNullOrWhiteSpace(newQuestionTopic) || newQuestionMaxMark <= 0)
+        {
+            questionError = "Please fill in all fields.";
+            return;
+        }
+
+        var totalQuestionMarks = assessmentQuestions.Sum(q => q.MaxMark) + newQuestionMaxMark;
+        if (totalQuestionMarks > selectedAssessment.MaxMark)
+        {
+            questionError = $"Total question marks ({totalQuestionMarks}) would exceed assessment max ({selectedAssessment.MaxMark}).";
+            return;
+        }
+
+        var question = new AssessmentQuestion
+        {
+            AssessmentId = selectedAssessment.AssessmentId,
+            QuestionNumber = newQuestionNumber,
+            Topic = newQuestionTopic,
+            MaxMark = newQuestionMaxMark
+        };
+
+        DbContext.AssessmentQuestions.Add(question);
+        await DbContext.SaveChangesAsync();
+
+        questionSuccess = "Question created!";
+        newQuestionNumber++;
+        newQuestionTopic = string.Empty;
+        newQuestionMaxMark = 0;
+        await LoadAssessmentQuestions();
+    }
+
+    private async Task DeleteQuestion(AssessmentQuestion question)
+    {
+        try
+        {
+            var questionToDelete = await DbContext.AssessmentQuestions.FindAsync(question.QuestionId);
+            if (questionToDelete != null)
+            {
+                var marks = await DbContext.LearnerQuestionMarks
+                    .Where(m => m.QuestionId == question.QuestionId)
+                    .ToListAsync();
+                DbContext.LearnerQuestionMarks.RemoveRange(marks);
+                DbContext.AssessmentQuestions.Remove(questionToDelete);
+                await DbContext.SaveChangesAsync();
+                questionSuccess = "Question deleted!";
+            }
+            await LoadAssessmentQuestions();
+        }
+        catch (Exception ex)
+        {
+            questionError = "Error deleting: " + ex.Message;
+        }
     }
 }

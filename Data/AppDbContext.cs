@@ -18,6 +18,9 @@ namespace ARIS1.Data
         public DbSet<LearnerMark> LearnerMarks { get; set; }
         public DbSet<AttendanceSession> AttendanceSessions { get; set; }
         public DbSet<AttendanceRecord> AttendanceRecords { get; set; }
+        public DbSet<AssessmentQuestion> AssessmentQuestions { get; set; }
+        public DbSet<LearnerQuestionMark> LearnerQuestionMarks { get; set; }
+        public DbSet<Intervention> Interventions { get; set; }
         protected override void OnModelCreating(ModelBuilder builder)
         {
             base.OnModelCreating(builder);
@@ -106,6 +109,46 @@ namespace ARIS1.Data
                 .HasOne(ar => ar.Learner)
                 .WithMany(l => l.AttendanceRecords)
                 .HasForeignKey(ar => ar.LearnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // AssessmentQuestion relationship - each question belongs to one assessment
+            // OnDelete.Restrict prevents deleting an assessment that has questions
+            builder.Entity<AssessmentQuestion>()
+                .HasOne(aq => aq.Assessment)
+                .WithMany()
+                .HasForeignKey(aq => aq.AssessmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // LearnerQuestionMark relationship - each mark belongs to one question
+            // WithMany(q => q.LearnerMarks) means a question can have many learner marks
+            // OnDelete.Restrict prevents deleting a question that has recorded marks
+            builder.Entity<LearnerQuestionMark>()
+                .HasOne(lqm => lqm.Question)
+                .WithMany(q => q.LearnerMarks)
+                .HasForeignKey(lqm => lqm.QuestionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // LearnerQuestionMark relationship - each mark belongs to one learner
+            // OnDelete.Restrict prevents deleting a learner that has question marks
+            builder.Entity<LearnerQuestionMark>()
+                .HasOne(lqm => lqm.Learner)
+                .WithMany()
+                .HasForeignKey(lqm => lqm.LearnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Intervention relationship - each intervention targets one learner
+            // OnDelete.Restrict prevents deleting a learner that has interventions
+            builder.Entity<Intervention>()
+                .HasOne(i => i.Learner)
+                .WithMany()
+                .HasForeignKey(i => i.LearnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Intervention relationship - each intervention is linked to one question
+            // OnDelete.Restrict prevents deleting a question that has triggered interventions
+            builder.Entity<Intervention>()
+                .HasOne(i => i.Question)
+                .WithMany()
+                .HasForeignKey(i => i.QuestionId)
                 .OnDelete(DeleteBehavior.Restrict);
         }
     }

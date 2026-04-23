@@ -6,10 +6,14 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.EntityFrameworkCore;
+using ARIS1.Services;
 
 //testing git changes
 
 var builder = WebApplication.CreateBuilder(args);
+
+//Add intervention services
+builder.Services.AddScoped<InterventionService>();
 
 // Add Database Context
 builder.Services.AddDbContext<AppDbContext>(options =>

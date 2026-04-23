@@ -2,22 +2,27 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = "Learner")]
+@rendermode InteractiveServer
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
+@inject AppDbContext DbContext
 @inject NavigationManager Navigation
-@rendermode InteractiveServer
 
-<h2>My Dashboard</h2>
-<p>Welcome, @currentUser?.Fullname</p>
+<h2>Welcome, @currentUser?.Fullname</h2>
 
 <div class="row mt-4">
     <div class="col-md-3">
         <div class="card text-white bg-primary mb-3">
             <div class="card-body">
                 <h5 class="card-title">My Marks</h5>
-                <p class="card-text">View your academic progress.</p>
-                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/learner/marks")'>Go</button>
+                <p class="card-text">View your assessment marks by subject.</p>
+                <button class="btn btn-light"
+                        @onclick='() => Navigation.NavigateTo("/learner/marks")'>
+                    Go
+                </button>
             </div>
         </div>
     </div>
@@ -25,24 +30,181 @@
         <div class="card text-white bg-success mb-3">
             <div class="card-body">
                 <h5 class="card-title">My Attendance</h5>
-                <p class="card-text">View your attendance record.</p>
-                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/learner/attendance")'>Go</button>
+                <p class="card-text">View your attendance record by subject.</p>
+                <button class="btn btn-light"
+                        @onclick='() => Navigation.NavigateTo("/learner/attendance")'>
+                    Go
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info mb-3">
+            <div class="card-body">
+                <h5 class="card-title">My Profile</h5>
+                <p class="card-text">View your full profile.</p>
+                <button class="btn btn-light"
+                        @onclick='() => Navigation.NavigateTo("/learner/profile")'>
+                    Go
+                </button>
             </div>
         </div>
     </div>
 </div>
 
-<button class="btn btn-secondary mt-3" @onclick="Logout">Logout</button>
+<hr />
+<h4>My Interventions</h4>
+
+@if (subjects.Count == 0)
+{
+    <div class="alert alert-success">No subjects enrolled yet.</div>
+}
+else
+{
+    <div class="row">
+        @foreach (var subject in subjects)
+        {
+            var subjectInterventions = interventions
+                .Where(i => i.Question.Assessment.SubjectId == subject.SubjectId)
+                .ToList();
+
+            <div class="col-md-4 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>@subject.Name (Grade @subject.Grade)</h5>
+                    </div>
+                    <div class="card-body">
+                        <p>@subjectInterventions.Count intervention(s)</p>
+                        <button class="btn btn-primary btn-sm"
+                                @onclick="() => OpenInterventionModal(subject)">
+                            View Interventions
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (selectedSubject != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Interventions - @selectedSubject.Name</h5>
+                </div>
+                <div class="modal-body">
+                    @foreach (var term in new[] { 1, 2, 3, 4 })
+                    {
+                        var termInterventions = interventions
+                            .Where(i => i.Question.Assessment.SubjectId == selectedSubject.SubjectId &&
+                                       i.Question.Assessment.Term == term)
+                            .ToList();
+
+                        <h5>Term @term</h5>
+                        @if (termInterventions.Count == 0)
+                        {
+                            <p class="text-muted">No interventions for this term.</p>
+                        }
+                        else
+                        {
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Assessment</th>
+                                        <th>Topic</th>
+                                        <th>Score</th>
+                                        <th>Status</th>
+                                        <th>Message</th>
+                                        <th>Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var intervention in termInterventions)
+                                    {
+                                        var badgeColor = intervention.Level == "Critical" ? "#dc3545" :
+                                                         intervention.Level == "Attention" ? "#fd7e14" :
+                                                         intervention.Level == "Focus" ? "#ffc107" :
+                                                         intervention.Level == "Minor" ? "#90EE90" : "#198754";
+                                        var textColor = intervention.Level == "Focus" ||
+                                                        intervention.Level == "Minor" ? "black" : "white";
+                                        <tr>
+                                            <td>@intervention.Question.Assessment.Title</td>
+                                            <td>@intervention.Topic</td>
+                                            <td>@intervention.PercentageScore.ToString("F1")%</td>
+                                            <td>
+                                                <span class="badge"
+                                                      style="background-color: @badgeColor; color: @textColor">
+                                                    @intervention.Level
+                                                </span>
+                                            </td>
+                                            <td>@intervention.Message</td>
+                                            <td>@intervention.CreatedDate.ToString("dd MMM yyyy")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                        <hr />
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary"
+                            @onclick="() => selectedSubject = null">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 
 @code {
     private User? currentUser;
+    private Learner? currentLearner;
+    private List<Subject> subjects = new();
+    private List<Intervention> interventions = new();
+    private Subject? selectedSubject;
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
+
         if (user.Identity?.IsAuthenticated == true)
+        {
             currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
+
+            currentLearner = await DbContext.Learners
+                .AsNoTracking()
+                .FirstOrDefaultAsync(l => l.UserId == currentUser!.Id);
+
+            if (currentLearner != null)
+            {
+                subjects = await DbContext.LearnerSubjects
+                    .AsNoTracking()
+                    .Where(ls => ls.LearnerId == currentLearner.LearnerId)
+                    .Include(ls => ls.Subject)
+                    .Select(ls => ls.Subject)
+                    .ToListAsync();
+
+                interventions = await DbContext.Interventions
+                    .AsNoTracking()
+                    .Where(i => i.LearnerId == currentLearner.LearnerId)
+                    .Include(i => i.Question)
+                    .ThenInclude(q => q.Assessment)
+                    .OrderBy(i => i.Question.Assessment.Term)
+                    .ThenBy(i => i.Level)
+                    .ToListAsync();
+            }
+        }
+    }
+
+    private void OpenInterventionModal(Subject subject)
+    {
+        selectedSubject = subject;
     }
 
     private void Logout()

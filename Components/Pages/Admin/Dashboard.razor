@@ -34,7 +34,7 @@
         <div class="card text-white bg-info mb-3">
             <div class="card-body">
                 <h5 class="card-title">Enrollment</h5>
-                <p class="card-text">Enroll learners into subjects.</p>
+                <p class="card-text">Enroll learners into subjects that you have created.</p>
                 <button class="btn btn-light"
                         @onclick='() => Navigation.NavigateTo("/admin/enrollment")'>
                     Go
@@ -42,9 +42,19 @@
             </div>
         </div>
     </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-secondary mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Learner Profiles</h5>
+                <p class="card-text">View learner interventions and progress.</p>
+                <button class="btn btn-light"
+                        @onclick='() => Navigation.NavigateTo("/teacher/learnerprofiles")'>
+                    Go
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
-
-<button class="btn btn-secondary mt-3" @onclick="Logout">Logout</button>
 
 @code {
     private User? currentUser;

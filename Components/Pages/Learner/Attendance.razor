@@ -1,0 +1,101 @@
+﻿@page "/learner/attendance"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Learner")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h2>My Attendance</h2>
+
+@if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else if (subjects.Count == 0)
+{
+    <p class="text-muted">You are not enrolled in any subjects yet.</p>
+}
+else
+{
+    @foreach (var subject in subjects)
+    {
+        var attendanceRecords = DbContext.AttendanceRecords
+            .AsNoTracking()
+            .Where(ar => ar.Session.SubjectId == subject.SubjectId &&
+                       ar.LearnerId == currentLearner!.LearnerId)
+            .Include(ar => ar.Session)
+            .ToList();
+
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5>@subject.Name (Grade @subject.Grade)</h5>
+            </div>
+            <div class="card-body">
+                @if (attendanceRecords.Count == 0)
+                {
+                    <p class="text-muted">No attendance records yet.</p>
+                }
+                else
+                {
+                    int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
+                    float attendancePercentage = (presentCount * 100f) / attendanceRecords.Count;
+                    
+                    <p><strong>Attendance Rate: @attendancePercentage.ToString("F1")%</strong> (@presentCount / @attendanceRecords.Count present)</p>
+                    
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var record in attendanceRecords.OrderByDescending(ar => ar.Session.Date))
+                            {
+                                <tr>
+                                    <td>@record.Session.Date.ToString("dd MMM yyyy")</td>
+                                    <td>
+                                        <span class="badge bg-@(record.Status == "Present" ? "success" : record.Status == "Absent" ? "danger" : "warning")">
+                                            @record.Status
+                                        </span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private Learner? currentLearner;
+    private List<Subject>? subjects;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+        currentLearner = await DbContext.Learners
+            .AsNoTracking()
+            .Include(l => l.User)
+            .FirstOrDefaultAsync(l => l.UserId == user!.Id);
+
+        if (currentLearner != null)
+        {
+            subjects = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.LearnerId == currentLearner.LearnerId)
+                .Include(ls => ls.Subject)
+                .Select(ls => ls.Subject)
+                .ToListAsync();
+        }
+    }
+}

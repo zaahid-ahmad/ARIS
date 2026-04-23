@@ -1,0 +1,227 @@
+﻿@page "/teacher/atrisk"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Teacher")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<h2>At-Risk Learners</h2>
+
+@if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <label>Select Subject</label>
+            <select class="form-control" @bind="selectedSubjectId">
+                <option value="0">-- Select Subject --</option>
+                @foreach (var subject in subjects)
+                {
+                    <option value="@subject.SubjectId">
+                        @subject.Name (Grade @subject.Grade)
+                    </option>
+                }
+            </select>
+            <button class="btn btn-primary mt-2" @onclick="LoadAtRiskLearners">Load Learners</button>
+        </div>
+    </div>
+
+    @if (atRiskLearners.Count > 0)
+    {
+        <h4>At-Risk Analysis</h4>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Learner</th>
+                    <th>Risk Level</th>
+                    <th>Risk Score</th>
+                    <th>Attendance %</th>
+                    <th>Current Average</th>
+                    <th>Intervention</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var learner in atRiskLearners)
+                {
+                    var riskData = learnerRiskCache[learner.LearnerId];
+                    var badgeClass = riskData.Level == "Critical" ? "danger" :
+                                    riskData.Level == "High" ? "warning" : "info";
+                    <tr>
+                        <td>@learner.User?.Fullname</td>
+                        <td>
+                            <span class="badge bg-@badgeClass">@riskData.Level</span>
+                        </td>
+                        <td>@riskData.Score.ToString("F1")</td>
+                        <td>@riskData.AttendancePercentage.ToString("F1")%</td>
+                        <td>@riskData.AcademicAverage.ToString("F1")%</td>
+                        <td>@riskData.Intervention</td>
+                        <td>
+                            <button class="btn btn-primary btn-sm"
+                                    @onclick="() => ViewLearnerProfile(learner)">
+                                View Profile
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else if (selectedSubjectId > 0 && hasLoaded)
+    {
+        <div class="alert alert-success">
+            No at-risk learners in this subject. Great job!
+        </div>
+    }
+}
+
+@code {
+    private List<Subject> subjects = new();
+    private List<Learner> atRiskLearners = new();
+    private Dictionary<int, RiskData> learnerRiskCache = new();
+    private int selectedSubjectId = 0;
+    private bool hasLoaded = false;
+    private Teacher? currentTeacher;
+
+    private class RiskData
+    {
+        public string Level { get; set; } = string.Empty;
+        public float Score { get; set; }
+        public float AttendancePercentage { get; set; }
+        public float AcademicAverage { get; set; }
+        public string Intervention { get; set; } = string.Empty;
+    }
+
+    private void ViewLearnerProfile(Learner learner)
+    {
+        Navigation.NavigateTo($"/teacher/learnerprofiles?learner={learner.LearnerId}");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+        currentTeacher = await DbContext.Teachers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.UserId == user!.Id);
+
+        if (currentTeacher != null)
+        {
+            subjects = await DbContext.Subjects
+                .AsNoTracking()
+                .Where(s => s.TeacherId == currentTeacher.TeacherId)
+                .ToListAsync();
+        }
+    }
+
+    private async Task LoadAtRiskLearners()
+    {
+        if (selectedSubjectId == 0) return;
+
+        hasLoaded = false;
+        learnerRiskCache.Clear();
+        atRiskLearners.Clear();
+
+        atRiskLearners = await DbContext.LearnerSubjects
+            .AsNoTracking()
+            .Where(ls => ls.SubjectId == selectedSubjectId)
+            .Include(ls => ls.Learner)
+            .ThenInclude(l => l.User)
+            .Select(ls => ls.Learner)
+            .ToListAsync();
+
+        // Pre-calculate all risk data
+        foreach (var learner in atRiskLearners)
+        {
+            var riskData = CalculateRiskScore(learner);
+            learnerRiskCache[learner.LearnerId] = riskData;
+        }
+
+        // Filter to only at-risk learners
+        atRiskLearners = atRiskLearners
+            .Where(l => learnerRiskCache[l.LearnerId].Score >= 45)
+            .ToList();
+
+        hasLoaded = true;
+    }
+
+    private RiskData CalculateRiskScore(Learner learner)
+    {
+        var riskData = new RiskData();
+
+        // Calculate attendance percentage
+        var attendanceRecords = DbContext.AttendanceRecords
+            .AsNoTracking()
+            .Where(ar => ar.LearnerId == learner.LearnerId)
+            .ToList();
+
+        int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
+        riskData.AttendancePercentage = attendanceRecords.Count > 0
+            ? (presentCount * 100f) / attendanceRecords.Count
+            : 100;
+
+        // Calculate academic average
+        var marks = DbContext.LearnerMarks
+            .AsNoTracking()
+            .Where(m => m.Assessment.SubjectId == selectedSubjectId && m.LearnerId == learner.LearnerId && !m.IsAbsent)
+            .Include(m => m.Assessment)
+            .ToList();
+
+        if (marks.Count == 0)
+        {
+            riskData.AcademicAverage = 0;
+        }
+        else
+        {
+            float totalPercentage = 0;
+            foreach (var mark in marks)
+            {
+                float percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
+                totalPercentage += percentage;
+            }
+            riskData.AcademicAverage = totalPercentage / marks.Count;
+        }
+
+        // Calculate composite risk score
+        // 60% academics + 30% attendance + 10% trend (simplified to 0 for now)
+        float academicFactor = 60 * (riskData.AcademicAverage / 100);
+        float attendanceFactor = 30 * (riskData.AttendancePercentage / 100);
+        float trendFactor = 10 * 0.5f;
+
+        riskData.Score = 100 - (academicFactor + attendanceFactor + trendFactor);
+
+        // Determine risk level and intervention
+        if (riskData.Score >= 55)
+        {
+            riskData.Level = "Critical";
+            riskData.Intervention = "Urgent: Parent meeting required, intensive intervention needed";
+        }
+        else if (riskData.Score >= 45)
+        {
+            riskData.Level = "High";
+            riskData.Intervention = "Schedule tutoring sessions, monitor progress closely";
+        }
+        else if (riskData.Score >= 30)
+        {
+            riskData.Level = "Moderate";
+            riskData.Intervention = "Provide extra support, encourage participation";
+        }
+        else
+        {
+            riskData.Level = "Low";
+            riskData.Intervention = "Continue regular monitoring";
+        }
+
+        return riskData;
+    }
+}

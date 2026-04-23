@@ -1,0 +1,97 @@
+﻿@page "/learner/marks"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Learner")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h2>My Marks</h2>
+
+@if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else if (subjects.Count == 0)
+{
+    <p class="text-muted">You are not enrolled in any subjects yet.</p>
+}
+else
+{
+    @foreach (var subject in subjects)
+    {
+        var marks = DbContext.LearnerMarks
+            .AsNoTracking()
+            .Where(m => m.Assessment.SubjectId == subject.SubjectId && 
+                       m.LearnerId == currentLearner!.LearnerId &&
+                       !m.IsAbsent)
+            .Include(m => m.Assessment)
+            .ToList();
+
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5>@subject.Name (Grade @subject.Grade)</h5>
+            </div>
+            <div class="card-body">
+                @if (marks.Count == 0)
+                {
+                    <p class="text-muted">No marks yet.</p>
+                }
+                else
+                {
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Assessment</th>
+                                <th>Mark</th>
+                                <th>Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var mark in marks)
+                            {
+                                var percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
+                                <tr>
+                                    <td>@mark.Assessment.Title</td>
+                                    <td>@mark.MarksAwarded / @mark.Assessment.MaxMark</td>
+                                    <td>@percentage.ToString("F1")%</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <p><strong>Subject Average: @marks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100).ToString("F1")%</strong></p>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private Learner? currentLearner;
+    private List<Subject>? subjects;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+        currentLearner = await DbContext.Learners
+            .AsNoTracking()
+            .Include(l => l.User)
+            .FirstOrDefaultAsync(l => l.UserId == user!.Id);
+
+        if (currentLearner != null)
+        {
+            subjects = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.LearnerId == currentLearner.LearnerId)
+                .Include(ls => ls.Subject)
+                .Select(ls => ls.Subject)
+                .ToListAsync();
+        }
+    }
+}
