@@ -21,6 +21,11 @@ namespace ARIS1.Data
         public DbSet<AssessmentQuestion> AssessmentQuestions { get; set; }
         public DbSet<LearnerQuestionMark> LearnerQuestionMarks { get; set; }
         public DbSet<Intervention> Interventions { get; set; }
+        public DbSet<WeightingStructure> WeightingStructures { get; set; }
+        public DbSet<WeightingNode> WeightingNodes { get; set; }
+        public DbSet<GradeBand> GradeBands { get; set; }
+        public DbSet<WeightingValidation> WeightingValidations { get; set; }
+
         protected override void OnModelCreating(ModelBuilder builder)
         {
             base.OnModelCreating(builder);
@@ -116,7 +121,7 @@ namespace ARIS1.Data
                 .HasOne(aq => aq.Assessment)
                 .WithMany()
                 .HasForeignKey(aq => aq.AssessmentId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Cascade);
 
             // LearnerQuestionMark relationship - each mark belongs to one question
             // WithMany(q => q.LearnerMarks) means a question can have many learner marks
@@ -125,7 +130,7 @@ namespace ARIS1.Data
                 .HasOne(lqm => lqm.Question)
                 .WithMany(q => q.LearnerMarks)
                 .HasForeignKey(lqm => lqm.QuestionId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Cascade);
 
             // LearnerQuestionMark relationship - each mark belongs to one learner
             // OnDelete.Restrict prevents deleting a learner that has question marks
@@ -141,7 +146,7 @@ namespace ARIS1.Data
                 .HasOne(i => i.Learner)
                 .WithMany()
                 .HasForeignKey(i => i.LearnerId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Cascade);
 
             // Intervention relationship - each intervention is linked to one question
             // OnDelete.Restrict prevents deleting a question that has triggered interventions
@@ -150,6 +155,55 @@ namespace ARIS1.Data
                 .WithMany()
                 .HasForeignKey(i => i.QuestionId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // WeightingStructure relationships
+            builder.Entity<WeightingStructure>()
+                .HasOne(ws => ws.Subject)
+                .WithMany()
+                .HasForeignKey(ws => ws.SubjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // WeightingNode relationships - self-referencing hierarchy
+            builder.Entity<WeightingNode>()
+                .HasOne(wn => wn.WeightingStructure)
+                .WithMany(ws => ws.RootNodes)
+                .HasForeignKey(wn => wn.WeightingStructureId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.Entity<WeightingNode>()
+                .HasOne(wn => wn.ParentNode)
+                .WithMany(wn => wn.ChildNodes)
+                .HasForeignKey(wn => wn.ParentNodeId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            builder.Entity<WeightingNode>()
+                .HasOne(wn => wn.AssessmentType)
+                .WithMany()
+                .HasForeignKey(wn => wn.AssessmentTypeId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
+            // GradeBand relationships
+            builder.Entity<GradeBand>()
+                .HasOne(gb => gb.Subject)
+                .WithMany()
+                .HasForeignKey(gb => gb.SubjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for common queries
+            builder.Entity<WeightingStructure>()
+                .HasIndex(ws => new { ws.SubjectId, ws.Term })
+                .IsUnique();
+
+            builder.Entity<GradeBand>()
+                .HasIndex(gb => new { gb.SubjectId, gb.MinPercentage, gb.MaxPercentage });
+
+            //Weighting Validation relationships
+            builder.Entity<WeightingValidation>()
+                .HasOne(wv => wv.WeightingStructure)
+                .WithMany(ws => ws.Validations)
+                .HasForeignKey(wv => wv.WeightingStructureId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

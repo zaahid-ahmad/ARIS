@@ -24,20 +24,16 @@ else
 {
     @foreach (var subject in subjects)
     {
-        var marks = DbContext.LearnerMarks
-            .AsNoTracking()
-            .Where(m => m.Assessment.SubjectId == subject.SubjectId && 
-                       m.LearnerId == currentLearner!.LearnerId &&
-                       !m.IsAbsent)
-            .Include(m => m.Assessment)
-            .ToList();
+        var subjectMarks = subjectMarksCache.ContainsKey(subject.SubjectId)
+            ? subjectMarksCache[subject.SubjectId]
+            : new List<LearnerMark>();
 
         <div class="card mb-3">
             <div class="card-header">
                 <h5>@subject.Name (Grade @subject.Grade)</h5>
             </div>
             <div class="card-body">
-                @if (marks.Count == 0)
+                @if (subjectMarks.Count == 0)
                 {
                     <p class="text-muted">No marks yet.</p>
                 }
@@ -52,7 +48,7 @@ else
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var mark in marks)
+                            @foreach (var mark in subjectMarks)
                             {
                                 var percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
                                 <tr>
@@ -63,7 +59,7 @@ else
                             }
                         </tbody>
                     </table>
-                    <p><strong>Subject Average: @marks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100).ToString("F1")%</strong></p>
+                    <p><strong>Subject Average: @subjectMarks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100).ToString("F1")%</strong></p>
                 }
             </div>
         </div>
@@ -73,6 +69,7 @@ else
 @code {
     private Learner? currentLearner;
     private List<Subject>? subjects;
+    private Dictionary<int, List<LearnerMark>> subjectMarksCache = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -92,6 +89,20 @@ else
                 .Include(ls => ls.Subject)
                 .Select(ls => ls.Subject)
                 .ToListAsync();
+
+            // Pre-load all marks into cache
+            var allMarks = await DbContext.LearnerMarks
+                .AsNoTracking()
+                .Where(m => m.LearnerId == currentLearner.LearnerId && !m.IsAbsent)
+                .Include(m => m.Assessment)
+                .ToListAsync();
+
+            foreach (var subject in subjects)
+            {
+                subjectMarksCache[subject.SubjectId] = allMarks
+                    .Where(m => m.Assessment.SubjectId == subject.SubjectId)
+                    .ToList();
+            }
         }
     }
 }

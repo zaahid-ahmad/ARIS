@@ -12,8 +12,11 @@ using ARIS1.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-//Add intervention services
+builder.Services.AddScoped<WeightingService>();
+
 builder.Services.AddScoped<InterventionService>();
+
+builder.Services.AddScoped<WeightCalculationService>();
 
 // Add Database Context
 builder.Services.AddDbContext<AppDbContext>(options =>

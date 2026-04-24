@@ -4,6 +4,7 @@ using ARIS1.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ARIS1.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260424092834_AddWeightingSystemAndGradeBands")]
+    partial class AddWeightingSystemAndGradeBands
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -561,38 +564,6 @@ namespace ARIS1.Migrations
                     b.ToTable("WeightingStructures");
                 });
 
-            modelBuilder.Entity("ARIS1.Models.WeightingValidation", b =>
-                {
-                    b.Property<int>("WeightingValidationId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("WeightingValidationId"));
-
-                    b.Property<DateTime>("CheckedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsValid")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("NodePath")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("WeightingStructureId")
-                        .HasColumnType("int");
-
-                    b.HasKey("WeightingValidationId");
-
-                    b.HasIndex("WeightingStructureId");
-
-                    b.ToTable("WeightingValidations");
-                });
-
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
                     b.Property<string>("Id")
@@ -961,17 +932,6 @@ namespace ARIS1.Migrations
                     b.Navigation("Subject");
                 });
 
-            modelBuilder.Entity("ARIS1.Models.WeightingValidation", b =>
-                {
-                    b.HasOne("ARIS1.Models.WeightingStructure", "WeightingStructure")
-                        .WithMany("Validations")
-                        .HasForeignKey("WeightingStructureId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("WeightingStructure");
-                });
-
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -1074,8 +1034,6 @@ namespace ARIS1.Migrations
             modelBuilder.Entity("ARIS1.Models.WeightingStructure", b =>
                 {
                     b.Navigation("RootNodes");
-
-                    b.Navigation("Validations");
                 });
 #pragma warning restore 612, 618
         }

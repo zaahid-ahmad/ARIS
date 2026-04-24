@@ -97,7 +97,7 @@
                             <td>
                                 <input type="number" class="form-control form-control-sm"
                                        @bind="marks[key]"
-                                       @bind:after="() => ValidateMark(learner.LearnerId, question)""
+                                       @bind:after="() => ValidateMark(learner.LearnerId, question)"
                                        disabled="@isAbsent[learner.LearnerId]"
                                        max="@question.MaxMark" />
                             </td>
@@ -307,11 +307,47 @@
 
         await DbContext.SaveChangesAsync();
 
+        // Calculate and save overall assessment marks from question marks
+        foreach (var learner in learners)
+        {
+            float totalMarksAwarded = 0;
+            foreach (var question in assessmentQuestions)
+            {
+                var key = $"{learner.LearnerId}_{question.QuestionId}";
+                totalMarksAwarded += marks[key];
+            }
+
+            var existingAssessmentMark = await DbContext.LearnerMarks
+                .FirstOrDefaultAsync(m =>
+                    m.AssessmentId == selectedAssessmentId &&
+                    m.LearnerId == learner.LearnerId);
+
+            if (existingAssessmentMark != null)
+            {
+                existingAssessmentMark.MarksAwarded = totalMarksAwarded;
+                existingAssessmentMark.IsAbsent = isAbsent[learner.LearnerId];
+                DbContext.LearnerMarks.Update(existingAssessmentMark);
+            }
+            else
+            {
+                var assessmentMark = new LearnerMark
+                {
+                    AssessmentId = selectedAssessmentId,
+                    LearnerId = learner.LearnerId,
+                    MarksAwarded = totalMarksAwarded,
+                    IsAbsent = isAbsent[learner.LearnerId]
+                };
+                DbContext.LearnerMarks.Add(assessmentMark);
+            }
+        }
+
+        await DbContext.SaveChangesAsync();
+
         // Generate interventions for each learner and question
         foreach (var learner in learners)
         {
             if (isAbsent[learner.LearnerId]) continue;
-    
+
             foreach (var question in assessmentQuestions)
             {
                 var key = $"{learner.LearnerId}_{question.QuestionId}";
@@ -325,7 +361,5 @@
         }
 
         successMessage = "Marks and interventions saved successfully!";
-
-        successMessage = "Marks saved successfully!";
     }
 }
