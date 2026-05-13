@@ -9,6 +9,10 @@ namespace ARIS1.Data
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
         {
         }
+
+        // New School entity
+        public DbSet<School> Schools { get; set; }
+
         public DbSet<Learner> Learners { get; set; }
         public DbSet<Teacher> Teachers { get; set; }
         public DbSet<Subject> Subjects { get; set; }
@@ -29,6 +33,31 @@ namespace ARIS1.Data
         protected override void OnModelCreating(ModelBuilder builder)
         {
             base.OnModelCreating(builder);
+
+            // ===== SCHOOL CONFIGURATION =====
+            builder.Entity<School>()
+                .HasKey(s => s.SchoolId);
+
+            builder.Entity<School>()
+                .HasIndex(s => s.Code)
+                .IsUnique();
+
+            // School -> Users (one-to-many)
+            builder.Entity<User>()
+                .HasOne(u => u.School)
+                .WithMany(s => s.Users)
+                .HasForeignKey(u => u.SchoolId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false); // SuperAdmin has no school
+
+            // School -> Subjects (one-to-many)
+            builder.Entity<Subject>()
+                .HasOne(s => s.School)
+                .WithMany(sch => sch.Subjects)
+                .HasForeignKey(s => s.SchoolId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ===== EXISTING CONFIGURATIONS =====
 
             // LearnerSubject composite primary key
             builder.Entity<LearnerSubject>()
@@ -115,41 +144,34 @@ namespace ARIS1.Data
                 .WithMany(l => l.AttendanceRecords)
                 .HasForeignKey(ar => ar.LearnerId)
                 .OnDelete(DeleteBehavior.Restrict);
-            // AssessmentQuestion relationship - each question belongs to one assessment
-            // OnDelete.Restrict prevents deleting an assessment that has questions
+
+            // AssessmentQuestion relationship
             builder.Entity<AssessmentQuestion>()
                 .HasOne(aq => aq.Assessment)
                 .WithMany()
                 .HasForeignKey(aq => aq.AssessmentId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // LearnerQuestionMark relationship - each mark belongs to one question
-            // WithMany(q => q.LearnerMarks) means a question can have many learner marks
-            // OnDelete.Restrict prevents deleting a question that has recorded marks
+            // LearnerQuestionMark relationship
             builder.Entity<LearnerQuestionMark>()
                 .HasOne(lqm => lqm.Question)
                 .WithMany(q => q.LearnerMarks)
                 .HasForeignKey(lqm => lqm.QuestionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // LearnerQuestionMark relationship - each mark belongs to one learner
-            // OnDelete.Restrict prevents deleting a learner that has question marks
             builder.Entity<LearnerQuestionMark>()
                 .HasOne(lqm => lqm.Learner)
                 .WithMany()
                 .HasForeignKey(lqm => lqm.LearnerId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // Intervention relationship - each intervention targets one learner
-            // OnDelete.Restrict prevents deleting a learner that has interventions
+            // Intervention relationship
             builder.Entity<Intervention>()
                 .HasOne(i => i.Learner)
                 .WithMany()
                 .HasForeignKey(i => i.LearnerId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Intervention relationship - each intervention is linked to one question
-            // OnDelete.Restrict prevents deleting a question that has triggered interventions
             builder.Entity<Intervention>()
                 .HasOne(i => i.Question)
                 .WithMany()
@@ -198,7 +220,7 @@ namespace ARIS1.Data
             builder.Entity<GradeBand>()
                 .HasIndex(gb => new { gb.SubjectId, gb.MinPercentage, gb.MaxPercentage });
 
-            //Weighting Validation relationships
+            // Weighting Validation relationships
             builder.Entity<WeightingValidation>()
                 .HasOne(wv => wv.WeightingStructure)
                 .WithMany(ws => ws.Validations)
