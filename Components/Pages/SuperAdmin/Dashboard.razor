@@ -1,0 +1,53 @@
+﻿@page "/superadmin/dashboard"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@attribute [Authorize(Roles = "SuperAdmin")]
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<h2>SuperAdmin Dashboard</h2>
+<p>Welcome, @currentUser?.Fullname</p>
+
+<div class="row mt-4">
+    <!-- Manage Schools -->
+    <div class="col-md-3">
+        <div class="card text-white bg-primary mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Manage Schools</h5>
+                <p class="card-text">Create, edit, or deactivate schools.</p>
+                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/superadmin/schools")'>Go</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Admins -->
+    <div class="col-md-3">
+        <div class="card text-white bg-success mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Manage Admins</h5>
+                <p class="card-text">Assign admins to schools and reset accounts.</p>
+                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/superadmin/admins")'>Go</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private User? currentUser;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+            currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
+    }
+
+    private void Logout()
+    {
+        Navigation.NavigateTo("/Account/Logout", forceLoad: true);
+    }
+}

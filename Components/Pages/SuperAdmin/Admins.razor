@@ -1,0 +1,353 @@
+﻿@page "/superadmin/admins"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "SuperAdmin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject AppDbContext DbContext
+
+<h2>Admins Management</h2>
+
+<button class="btn btn-primary mb-3" @onclick="ShowAddAdminModal">+ Add Admin</button>
+
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (admins == null)
+{
+    <p>Loading...</p>
+}
+else if (admins.Count == 0)
+{
+    <p class="text-muted">No admins yet.</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>School</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var admin in admins)
+            {
+                var schoolName = admin.School?.Name ?? "Not Assigned";
+                <tr>
+                    <td>@admin.Fullname</td>
+                    <td>@admin.Email</td>
+                    <td>@schoolName</td>
+                    <td>
+                        <span class="badge @(admin.IsActive ? "bg-success" : "bg-secondary")">
+                            @(admin.IsActive ? "Active" : "Inactive")
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-warning btn-sm me-1" @onclick="() => ShowResetPasswordModal(admin)">Reset Password</button>
+                        @if (admin.IsActive)
+                        {
+                            <button class="btn btn-danger btn-sm" @onclick="() => ShowDeactivateConfirm(admin)">Deactivate</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="() => ActivateAdmin(admin)">Activate</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<!-- ADD ADMIN MODAL -->
+@if (showAddAdminModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Admin</h5>
+                    <button type="button" class="btn-close" @onclick="() => showAddAdminModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger">@modalError</div>
+                    }
+                    <div class="mb-3">
+                        <label>Full Name</label>
+                        <input class="form-control" @bind="newAdminFullname" placeholder="e.g. John Doe" />
+                    </div>
+                    <div class="mb-3">
+                        <label>Email</label>
+                        <input class="form-control" @bind="newAdminEmail" type="email" placeholder="e.g. john@school.com" />
+                    </div>
+                    <div class="mb-3">
+                        <label>Assign to School</label>
+                        <select class="form-control" @bind="newAdminSchoolId">
+                            <option value="0">-- Select School --</option>
+                            @foreach (var school in schools ?? new List<School>())
+                            {
+                                <option value="@school.SchoolId">@school.Name</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => showAddAdminModal = false">Cancel</button>
+                    <button class="btn btn-primary" @onclick="CreateAdmin">Create Admin</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- RESET PASSWORD MODAL -->
+@if (adminToResetPassword != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Reset Password</h5>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(resetError))
+                    {
+                        <div class="alert alert-danger">@resetError</div>
+                    }
+                    <p>Generate a new temporary password for <strong>@adminToResetPassword.Fullname</strong>?</p>
+                    <div class="mb-3">
+                        <label>New Temporary Password</label>
+                        <div class="input-group">
+                            <input class="form-control" type="text" @bind="tempPassword" readonly />
+                            <button class="btn btn-secondary" @onclick="GenerateTempPassword">Generate</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => adminToResetPassword = null">Cancel</button>
+                    <button class="btn btn-primary" @onclick="ConfirmResetPassword" disabled="@string.IsNullOrEmpty(tempPassword)">Confirm Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- DEACTIVATE CONFIRMATION MODAL -->
+@if (adminToDeactivate != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Deactivate</h5>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to deactivate <strong>@adminToDeactivate.Fullname</strong>?</p>
+                    <p class="text-warning">They will no longer be able to log in.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => adminToDeactivate = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDeactivateAdmin">Deactivate</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<User>? admins;
+    private List<School>? schools;
+    private User? adminToResetPassword;
+    private User? adminToDeactivate;
+    
+    private bool showAddAdminModal = false;
+    private string newAdminFullname = string.Empty;
+    private string newAdminEmail = string.Empty;
+    private int newAdminSchoolId = 0;
+    private string tempPassword = string.Empty;
+
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private string modalError = string.Empty;
+    private string resetError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        admins = (await UserManager.GetUsersInRoleAsync("Admin"))
+            .ToList();
+
+        // Include school info
+        foreach (var admin in admins)
+        {
+            admin.School = await DbContext.Schools.FirstOrDefaultAsync(s => s.SchoolId == admin.SchoolId);
+        }
+
+        schools = await DbContext.Schools.AsNoTracking().OrderBy(s => s.Name).ToListAsync();
+    }
+
+    private void ShowAddAdminModal()
+    {
+        newAdminFullname = string.Empty;
+        newAdminEmail = string.Empty;
+        newAdminSchoolId = 0;
+        modalError = string.Empty;
+        showAddAdminModal = true;
+    }
+
+    private async Task CreateAdmin()
+    {
+        modalError = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(newAdminFullname) || string.IsNullOrWhiteSpace(newAdminEmail) || newAdminSchoolId == 0)
+        {
+            modalError = "All fields are required.";
+            return;
+        }
+
+        try
+        {
+            var existingUser = await UserManager.FindByEmailAsync(newAdminEmail);
+            if (existingUser != null)
+            {
+                modalError = "Email already in use.";
+                return;
+            }
+
+            // Generate temporary password
+            var tempPass = GenerateRandomPassword();
+
+            var newAdmin = new User
+            {
+                UserName = newAdminEmail,
+                Email = newAdminEmail,
+                Fullname = newAdminFullname,
+                Role = "Admin",
+                SchoolId = newAdminSchoolId,
+                IsActive = true,
+                EmailConfirmed = true
+            };
+
+            var result = await UserManager.CreateAsync(newAdmin, tempPass);
+            if (result.Succeeded)
+            {
+                await UserManager.AddToRoleAsync(newAdmin, "Admin");
+                successMessage = $"Admin created! Temporary password: {tempPass}";
+                showAddAdminModal = false;
+                await LoadData();
+            }
+            else
+            {
+                modalError = string.Join(", ", result.Errors.Select(e => e.Description));
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private void ShowResetPasswordModal(User admin)
+    {
+        adminToResetPassword = admin;
+        tempPassword = string.Empty;
+        resetError = string.Empty;
+    }
+
+    private void GenerateTempPassword()
+    {
+        tempPassword = GenerateRandomPassword();
+    }
+
+    private async Task ConfirmResetPassword()
+    {
+        if (adminToResetPassword == null) return;
+
+        try
+        {
+            var token = await UserManager.GeneratePasswordResetTokenAsync(adminToResetPassword);
+            var result = await UserManager.ResetPasswordAsync(adminToResetPassword, token, tempPassword);
+
+            if (result.Succeeded)
+            {
+                successMessage = $"Password reset for {adminToResetPassword.Fullname}. New password: {tempPassword}";
+                adminToResetPassword = null;
+                tempPassword = string.Empty;
+            }
+            else
+            {
+                resetError = string.Join(", ", result.Errors.Select(e => e.Description));
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private void ShowDeactivateConfirm(User admin)
+    {
+        adminToDeactivate = admin;
+    }
+
+    private async Task ConfirmDeactivateAdmin()
+    {
+        if (adminToDeactivate == null) return;
+
+        try
+        {
+            adminToDeactivate.IsActive = false;
+            await UserManager.UpdateAsync(adminToDeactivate);
+            successMessage = $"{adminToDeactivate.Fullname} has been deactivated.";
+            adminToDeactivate = null;
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task ActivateAdmin(User admin)
+    {
+        try
+        {
+            admin.IsActive = true;
+            await UserManager.UpdateAsync(admin);
+            successMessage = $"{admin.Fullname} has been activated.";
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private string GenerateRandomPassword()
+    {
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
+        var random = new Random();
+        return new string(Enumerable.Range(0, 12)
+            .Select(_ => chars[random.Next(chars.Length)])
+            .ToArray());
+    }
+}

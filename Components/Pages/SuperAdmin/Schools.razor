@@ -1,0 +1,268 @@
+﻿@page "/superadmin/schools"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Models
+@using ARIS1.Data
+@attribute [Authorize(Roles = "SuperAdmin")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject NavigationManager Navigation
+
+<h2>Schools Management</h2>
+
+<button class="btn btn-primary mb-3" @onclick="ShowAddSchoolModal">+ Add School</button>
+
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (schools == null)
+{
+    <p>Loading...</p>
+}
+else if (schools.Count == 0)
+{
+    <p class="text-muted">No schools yet.</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Code</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var school in schools)
+            {
+                <tr>
+                    <td>@school.Name</td>
+                    <td>@school.Code</td>
+                    <td>@school.Email</td>
+                    <td>@school.Phone</td>
+                    <td>
+                        <span class="badge @(school.IsActive ? "bg-success" : "bg-secondary")">
+                            @(school.IsActive ? "Active" : "Inactive")
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-info btn-sm" @onclick="() => EditSchool(school)">Edit</button>
+                        <button class="btn btn-danger btn-sm" @onclick="() => DeleteSchool(school)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<!-- ADD/EDIT SCHOOL MODAL -->
+@if (showSchoolModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditMode ? "Edit School" : "Add School")</h5>
+                    <button type="button" class="btn-close" @onclick="() => showSchoolModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger">@modalError</div>
+                    }
+                    <div class="mb-3">
+                        <label>School Name</label>
+                        <input class="form-control" @bind="newSchool.Name" placeholder="e.g. Central High School" />
+                    </div>
+                    <div class="mb-3">
+                        <label>School Code</label>
+                        <input class="form-control" @bind="newSchool.Code" placeholder="e.g. CHS001" />
+                    </div>
+                    <div class="mb-3">
+                        <label>Email</label>
+                        <input class="form-control" @bind="newSchool.Email" type="email" />
+                    </div>
+                    <div class="mb-3">
+                        <label>Phone</label>
+                        <input class="form-control" @bind="newSchool.Phone" />
+                    </div>
+                    <div class="mb-3">
+                        <label>Address</label>
+                        <textarea class="form-control" @bind="newSchool.Address"></textarea>
+                    </div>
+                    @if (isEditMode)
+                    {
+                        <div class="mb-3">
+                            <label>Status</label>
+                            <select class="form-control" @bind="newSchool.IsActive">
+                                <option value="true">Active</option>
+                                <option value="false">Inactive</option>
+                            </select>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => showSchoolModal = false">Cancel</button>
+                    <button class="btn btn-primary" @onclick="SaveSchool">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- DELETE CONFIRMATION MODAL -->
+@if (schoolToDelete != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Delete</h5>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete <strong>@schoolToDelete.Name</strong>?</p>
+                    <p class="text-danger">This cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => schoolToDelete = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDeleteSchool">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<School>? schools;
+    private School? schoolToDelete;
+    private School newSchool = new();
+    private bool showSchoolModal = false;
+    private bool isEditMode = false;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private string modalError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSchools();
+    }
+
+    private async Task LoadSchools()
+    {
+        schools = await DbContext.Schools
+            .AsNoTracking()
+            .OrderBy(s => s.Name)
+            .ToListAsync();
+    }
+
+    private void ShowAddSchoolModal()
+    {
+        newSchool = new School();
+        isEditMode = false;
+        showSchoolModal = true;
+        modalError = string.Empty;
+    }
+
+    private void EditSchool(School school)
+    {
+        newSchool = new School
+        {
+            SchoolId = school.SchoolId,
+            Name = school.Name,
+            Code = school.Code,
+            Email = school.Email,
+            Phone = school.Phone,
+            Address = school.Address,
+            IsActive = school.IsActive
+        };
+        isEditMode = true;
+        showSchoolModal = true;
+        modalError = string.Empty;
+    }
+
+    private async Task SaveSchool()
+    {
+        modalError = string.Empty;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(newSchool.Name) || string.IsNullOrWhiteSpace(newSchool.Code))
+        {
+            modalError = "School name and code are required.";
+            return;
+        }
+
+        try
+        {
+            if (isEditMode)
+            {
+                var existing = await DbContext.Schools.FindAsync(newSchool.SchoolId);
+                if (existing != null)
+                {
+                    existing.Name = newSchool.Name;
+                    existing.Code = newSchool.Code;
+                    existing.Email = newSchool.Email;
+                    existing.Phone = newSchool.Phone;
+                    existing.Address = newSchool.Address;
+                    existing.IsActive = newSchool.IsActive;
+                    existing.LastModifiedDate = DateTime.UtcNow;
+
+                    DbContext.Schools.Update(existing);
+                    successMessage = "School updated!";
+                }
+            }
+            else
+            {
+                newSchool.CreatedDate = DateTime.UtcNow;
+                newSchool.LastModifiedDate = DateTime.UtcNow;
+                DbContext.Schools.Add(newSchool);
+                successMessage = "School created!";
+            }
+
+            await DbContext.SaveChangesAsync();
+            showSchoolModal = false;
+            await LoadSchools();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private void DeleteSchool(School school)
+    {
+        schoolToDelete = school;
+    }
+
+    private async Task ConfirmDeleteSchool()
+    {
+        if (schoolToDelete == null) return;
+
+        try
+        {
+            var school = await DbContext.Schools.FindAsync(schoolToDelete.SchoolId);
+            if (school != null)
+            {
+                DbContext.Schools.Remove(school);
+                await DbContext.SaveChangesAsync();
+                successMessage = "School deleted!";
+                schoolToDelete = null;
+                await LoadSchools();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deleting school: {ex.Message}";
+        }
+    }
+}

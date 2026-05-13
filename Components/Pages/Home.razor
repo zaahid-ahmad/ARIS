@@ -23,6 +23,10 @@
                 Navigation.NavigateTo("/teacher/dashboard");
             else if (user.IsInRole("Learner"))
                 Navigation.NavigateTo("/learner/dashboard");
+            else if (user.IsInRole("SuperAdmin"))
+                Navigation.NavigateTo("/superadmin/dashboard");
+            else
+                Navigation.NavigateTo("/access-denied");
         }
     }
 }
