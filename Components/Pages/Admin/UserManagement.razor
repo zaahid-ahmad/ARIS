@@ -2,77 +2,42 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
+@using ARIS1.Data
+@using ARIS1.Services
+@using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = "Admin")]
 @rendermode InteractiveServer
 @inject UserManager<User> UserManager
+@inject AppDbContext DbContext
+@inject SchoolAuthorizationService AuthService
 @inject NavigationManager Navigation
 
+<h2>User Management</h2>
+<button class="btn btn-primary mb-3" @onclick='() => Navigation.NavigateTo("admin/users/create")'>+ Add New User</button>
 
-<h2>User Mangement</h2>
-<button class="btn btn-primary mb-3" @onclick='() => Navigation.NavigateTo("admin/users/create")'> +Add New User </button>
-@if (userToDelete != null)
+@if (!string.IsNullOrEmpty(errorMessage))
 {
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Confirm Delete</h5>
-                </div>
-                <div class="modal-body">
-                    <p>Are you sure you want to delete <strong>@userToDelete.Fullname</strong>?</p>
-                    <p class="text-danger">This cannot be undone.</p>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-danger" @onclick="ConfirmDelete">Yes, Delete</button>
-                    <button class="btn btn-secondary" @onclick="CancelDelete">Cancel</button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
-@if (userToReset != null)
-{
-    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Reset Password for @userToReset.Fullname</h5>
-                </div>
-                <div class="modal-body">
-                    @if (!string.IsNullOrEmpty(resetMessage))
-                    {
-                        <div class="alert alert-success">@resetMessage</div>
-                    }
-                    <label>New Password</label>
-                    <input type="password" class="form-control" @bind="newPassword" />
-                    <small class="text-muted">
-                        Username/Email: @userToReset.Email
-                    </small>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-warning"
-                            @onclick="ConfirmResetPassword">
-                        Reset Password
-                    </button>
-                    <button class="btn btn-secondary"
-                            @onclick="CancelReset">
-                        Cancel
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <div class="alert alert-danger">@errorMessage</div>
 }
 
-@if(users == null)
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (users == null)
 {
     <p>Loading...</p>
+}
+else if (users.Count == 0)
+{
+    <p class="text-muted">No users in your school.</p>
 }
 else
 {
     <div class="mb-3 mt-3 d-flex gap-2">
         <input class="form-control" placeholder="Search by name or email..."
-               @bind="searchTerm"/>
+               @bind="searchTerm" />
         <button class="btn btn-primary" @onclick="SearchUsers">Search</button>
         <button class="btn btn-secondary" @onclick="ClearSearch">Clear</button>
     </div>
@@ -93,29 +58,92 @@ else
                     <td>@user.Fullname</td>
                     <td>@user.Email</td>
                     <td>@user.Role</td>
-                    <td>@(user.IsActive ? "Yes":"No")</td>
+                    <td>@(user.IsActive ? "Yes" : "No")</td>
                     <td>
-                        <button class="btn btn-danger btn-sm"
-                                @onclick="() => DeleteUser(user)">
-                            Delete
-                        </button>
-                        <button class="btn btn-warning btn-sm ms-1"
-                                @onclick="() => ShowResetPassword(user)">
-                            Reset Password
-                        </button>
+                        @if (user.IsActive)
+                        {
+                            <button class="btn btn-warning btn-sm ms-1" @onclick="() => ShowResetPassword(user)">
+                                Reset Password
+                            </button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => ShowDeactivateConfirm(user)">
+                                Deactivate
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="() => ReactivateUser(user)">
+                                Reactivate
+                            </button>
+                        }
                     </td>
                 </tr>
             }
         </tbody>
     </table>
 }
+
+<!-- DELETE/DEACTIVATE CONFIRMATION MODAL -->
+@if (userToDeactivate != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Deactivate</h5>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to deactivate <strong>@userToDeactivate.Fullname</strong>?</p>
+                    <p class="text-warning">They will no longer be able to log in.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelDeactivate">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDeactivate">Deactivate</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- RESET PASSWORD MODAL -->
+@if (userToReset != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Reset Password for @userToReset.Fullname</h5>
+                    <button type="button" class="btn-close" @onclick="CancelReset"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(resetMessage))
+                    {
+                        <div class="alert alert-success">@resetMessage</div>
+                    }
+                    <label>New Password</label>
+                    <input type="password" class="form-control" @bind="newPassword" />
+                    <small class="text-muted">
+                        Username/Email: @userToReset.Email
+                    </small>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelReset">Cancel</button>
+                    <button class="btn btn-warning" @onclick="ConfirmResetPassword">Reset Password</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<User>? users;
-    private User? userToDelete;
+    private User? userToDeactivate;
     private User? userToReset;
     private string newPassword = string.Empty;
     private string searchTerm = string.Empty;
     private string resetMessage = string.Empty;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private int? currentSchoolId;
 
     private IEnumerable<User> FilteredUsers => users?
         .Where(u => string.IsNullOrWhiteSpace(searchTerm) ||
@@ -125,27 +153,78 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        users = await Task.Run(() => UserManager.Users.ToList());
-    }
+        // Get current admin's school
+        currentSchoolId = await AuthService.GetCurrentUserSchoolId(User.Identity?.Name);
 
-    private void DeleteUser(User user)
-    {
-        userToDelete = user;
-    }
-
-    private async Task ConfirmDelete()
-    {
-        if (userToDelete != null)
+        if (currentSchoolId == null)
         {
-            await UserManager.DeleteAsync(userToDelete);
-            users = await Task.Run(() => UserManager.Users.ToList());
-            userToDelete = null;
+            errorMessage = "You are not assigned to a school.";
+            return;
+        }
+
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            // ONLY load users from THIS school
+            users = await DbContext.Users
+                .AsNoTracking()
+                .Where(u => u.SchoolId == currentSchoolId)  // ← KEY: Filter by school
+                .ToList()
+                .AsAsyncEnumerable()
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading users: {ex.Message}";
         }
     }
 
-    private void CancelDelete()
+    private void ShowDeactivateConfirm(User user)
     {
-        userToDelete = null;
+        userToDeactivate = user;
+    }
+
+    private async Task ConfirmDeactivate()
+    {
+        if (userToDeactivate != null)
+        {
+            try
+            {
+                userToDeactivate.IsActive = false;
+                await UserManager.UpdateAsync(userToDeactivate);
+                successMessage = $"{userToDeactivate.Fullname} has been deactivated.";
+                userToDeactivate = null;
+                await LoadUsers();
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error: {ex.Message}";
+            }
+        }
+    }
+
+    private void CancelDeactivate()
+    {
+        userToDeactivate = null;
+    }
+
+    private async Task ReactivateUser(User user)
+    {
+        try
+        {
+            user.IsActive = true;
+            await UserManager.UpdateAsync(user);
+            successMessage = $"{user.Fullname} has been reactivated.";
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
     }
 
     private void ShowResetPassword(User user)
@@ -159,11 +238,26 @@ else
     {
         if (userToReset != null && !string.IsNullOrWhiteSpace(newPassword))
         {
-            var token = await UserManager.GeneratePasswordResetTokenAsync(userToReset);
-            var result = await UserManager.ResetPasswordAsync(userToReset, token, newPassword);
-            resetMessage = result.Succeeded ? "Password reset successfully!" :
-                string.Join(", ", result.Errors.Select(e => e.Description));
-            if (result.Succeeded) userToReset = null;
+            try
+            {
+                var token = await UserManager.GeneratePasswordResetTokenAsync(userToReset);
+                var result = await UserManager.ResetPasswordAsync(userToReset, token, newPassword);
+                
+                if (result.Succeeded)
+                {
+                    resetMessage = "Password reset successfully!";
+                    userToReset = null;
+                    newPassword = string.Empty;
+                }
+                else
+                {
+                    resetMessage = string.Join(", ", result.Errors.Select(e => e.Description));
+                }
+            }
+            catch (Exception ex)
+            {
+                resetMessage = $"Error: {ex.Message}";
+            }
         }
     }
 
@@ -171,8 +265,9 @@ else
     {
         userToReset = null;
         resetMessage = string.Empty;
+        newPassword = string.Empty;
     }
-    
+
     private void SearchUsers()
     {
         StateHasChanged();
