@@ -5,9 +5,11 @@
 @using ARIS1.Models
 @using ARIS1.Data
 @using ARIS1.Services
+@using System.Security.Claims
 @attribute [Authorize(Roles = "Admin")]
 @rendermode InteractiveServer
 @inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
 @inject AppDbContext DbContext
 @inject NavigationManager Navigation
 
@@ -639,24 +641,49 @@ else
     private string weightError = string.Empty;
     private string weightSuccess = string.Empty;
 
+    // School context
+    private int? currentSchoolId;
+
     // ===== LIFECYCLE =====
     protected override async Task OnInitializedAsync()
     {
+        // Get current admin's school
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+
+        if (string.IsNullOrEmpty(userName))
+        {
+            errorMessage = "You must be logged in.";
+            return;
+        }
+
+        var currentAdmin = await UserManager.FindByNameAsync(userName);
+        if (currentAdmin?.SchoolId == null)
+        {
+            errorMessage = "You are not assigned to a school.";
+            return;
+        }
+
+        currentSchoolId = currentAdmin.SchoolId;
         await LoadData();
     }
 
     // ===== LOAD DATA =====
     private async Task LoadData()
     {
+        // ONLY load subjects from this school
         subjects = await DbContext.Subjects
             .AsNoTracking()
             .Include(s => s.Teacher)
             .ThenInclude(t => t.User)
+            .Where(s => s.SchoolId == currentSchoolId)  // ← Filter by school
             .ToListAsync();
 
+        // ONLY load teachers from this school
         teachers = await DbContext.Teachers
             .AsNoTracking()
             .Include(t => t.User)
+            .Where(t => t.User.SchoolId == currentSchoolId)  // ← Filter by school
             .ToListAsync();
     }
 
@@ -677,7 +704,8 @@ else
             Name = subjectName,
             Grade = grade,
             TeacherId = teacherId,
-            AcademicYear = academicYear
+            AcademicYear = academicYear,
+            SchoolId = currentSchoolId.Value  // ← Assign to admin's school
         };
 
         DbContext.Subjects.Add(subject);
@@ -762,7 +790,7 @@ else
     {
         assessmentTypes = await DbContext.AssessmentTypes
             .AsNoTracking()
-            .Where(at => at.SubjectId == selectedSubject!.SubjectId)
+            .Where(at => at.Subject!.SchoolId == currentSchoolId && at.SubjectId == selectedSubject!.SubjectId)  // ← Filter by school
             .ToListAsync();
     }
 
@@ -823,7 +851,7 @@ else
                     .ToListAsync();
                 DbContext.WeightingNodes.RemoveRange(weightingNodes);
 
-                // Then delete related assessments...
+                // Then delete related assessments
                 var relatedAssessments = await DbContext.Assessments
                     .Where(a => a.AssessmentTypeId == assessmentTypeToDelete.AssessmentTypeId)
                     .ToListAsync();
@@ -881,7 +909,7 @@ else
         assessments = await DbContext.Assessments
             .AsNoTracking()
             .Include(a => a.AssessmentType)
-            .Where(a => a.SubjectId == selectedSubject!.SubjectId)
+            .Where(a => a.Subject!.SchoolId == currentSchoolId && a.SubjectId == selectedSubject!.SubjectId)  // ← Filter by school
             .ToListAsync();
     }
 
@@ -1165,7 +1193,6 @@ else
         catch (Exception ex)
         {
             weightError = $"Error: {ex.Message}";
-            Console.WriteLine($"Exception: {ex}");
         }
     }
 
@@ -1173,6 +1200,7 @@ else
     {
         weightTotal = weightingStructure?.RootNodes?.Sum(n => n.Weighting) ?? 0f;
     }
+
     private async Task SaveWeightingStructure()
     {
         try

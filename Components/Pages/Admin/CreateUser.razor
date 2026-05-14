@@ -4,13 +4,16 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
-@attribute [Authorize(Roles="Admin")]
+@using System.Security.Claims
+@attribute [Authorize(Roles = "Admin")]
 @rendermode InteractiveServer
 @inject UserManager<User> UserManager
 @inject NavigationManager Navigation
 @inject AppDbContext DbContext
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <h2>Create New User</h2>
+
 @if (!string.IsNullOrEmpty(errorMessage))
 {
     <div class="alert alert-danger">@errorMessage</div>
@@ -60,6 +63,7 @@
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
+        // Validate all fields
         if (string.IsNullOrWhiteSpace(fullName) ||
             string.IsNullOrWhiteSpace(email) ||
             string.IsNullOrWhiteSpace(password) ||
@@ -69,7 +73,7 @@
             return;
         }
 
-        //email validation
+        // Email validation
         var emailValid = new System.ComponentModel.DataAnnotations.EmailAddressAttribute();
         if (!emailValid.IsValid(email))
         {
@@ -77,6 +81,32 @@
             return;
         }
 
+        // Get current admin's school
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+        
+        if (string.IsNullOrEmpty(userName))
+        {
+            errorMessage = "You must be logged in.";
+            return;
+        }
+
+        var currentAdmin = await UserManager.FindByNameAsync(userName);
+        if (currentAdmin?.SchoolId == null)
+        {
+            errorMessage = "You are not assigned to a school.";
+            return;
+        }
+
+        // Check if email already exists
+        var existingUser = await UserManager.FindByEmailAsync(email);
+        if (existingUser != null)
+        {
+            errorMessage = "This email is already in use.";
+            return;
+        }
+
+        // Create new user
         var user = new User
         {
             UserName = email,
@@ -84,36 +114,53 @@
             Fullname = fullName,
             Role = role,
             IsActive = true,
-            EmailConfirmed = true
+            EmailConfirmed = true,
+            SchoolId = currentAdmin.SchoolId  // Assign to admin's school
         };
 
         var result = await UserManager.CreateAsync(user, password);
 
         if (result.Succeeded)
         {
-            await UserManager.AddToRoleAsync(user, role);
+            try
+            {
+                // Add user to role
+                await UserManager.AddToRoleAsync(user, role);
 
-            if (role == "Teacher")
-            {
-                var teacher = new Teacher { UserId = user.Id };
-                DbContext.Teachers.Add(teacher);
-                await DbContext.SaveChangesAsync();
-            }
-            else if (role == "Learner")
-            {
-                var learner = new Learner
+                // Create Teacher or Learner record
+                if (role == "Teacher")
                 {
-                    UserId = user.Id,
-                    Grade = 10,
-                    ClassName = "Unassigned",
-                    EnrollmentYear = DateTime.Now.Year
-                };
-                DbContext.Learners.Add(learner);
-                await DbContext.SaveChangesAsync();
-            }
+                    var teacher = new Teacher { UserId = user.Id };
+                    DbContext.Teachers.Add(teacher);
+                    await DbContext.SaveChangesAsync();
+                }
+                else if (role == "Learner")
+                {
+                    var learner = new Learner
+                    {
+                        UserId = user.Id,
+                        Grade = 10,
+                        ClassName = "Unassigned",
+                        EnrollmentYear = DateTime.Now.Year
+                    };
+                    DbContext.Learners.Add(learner);
+                    await DbContext.SaveChangesAsync();
+                }
 
-            successMessage = $"{role} account created successfully!";
-            fullName = email = password = role = string.Empty;
+                successMessage = $"{role} account created successfully!";
+                fullName = string.Empty;
+                email = string.Empty;
+                password = string.Empty;
+                role = string.Empty;
+
+                // Redirect back to users list after a short delay
+                await Task.Delay(1500);
+                Navigation.NavigateTo("/admin/users");
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error creating {role} record: {ex.Message}";
+            }
         }
         else
         {
