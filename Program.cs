@@ -17,6 +17,7 @@ builder.Services.AddScoped<WeightingService>();
 builder.Services.AddScoped<InterventionService>();
 
 builder.Services.AddScoped<WeightCalculationService>();
+builder.Services.AddScoped<SchoolAuthorizationService>();
 
 // Add Database Context
 builder.Services.AddDbContext<AppDbContext>(options =>

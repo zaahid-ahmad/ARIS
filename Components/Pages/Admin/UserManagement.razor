@@ -11,6 +11,8 @@
 @inject AppDbContext DbContext
 @inject SchoolAuthorizationService AuthService
 @inject NavigationManager Navigation
+@using System.Security.Claims
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <h2>User Management</h2>
 <button class="btn btn-primary mb-3" @onclick='() => Navigation.NavigateTo("admin/users/create")'>+ Add New User</button>
@@ -153,8 +155,19 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Get current user from authentication state
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+
+        if (string.IsNullOrEmpty(userName))
+        {
+            errorMessage = "You must be logged in.";
+            return;
+        }
+
         // Get current admin's school
-        currentSchoolId = await AuthService.GetCurrentUserSchoolId(User.Identity?.Name);
+        var currentUser = await UserManager.FindByNameAsync(userName);
+        currentSchoolId = currentUser?.SchoolId;
 
         if (currentSchoolId == null)
         {
@@ -171,10 +184,7 @@ else
         {
             // ONLY load users from THIS school
             users = await DbContext.Users
-                .AsNoTracking()
-                .Where(u => u.SchoolId == currentSchoolId)  // ← KEY: Filter by school
-                .ToList()
-                .AsAsyncEnumerable()
+                .Where(u => u.SchoolId == currentSchoolId)  // ← Filter by school
                 .ToListAsync();
         }
         catch (Exception ex)
