@@ -63,7 +63,7 @@ else
                         }
                         else
                         {
-                            <button class="btn btn-success btn-sm" @onclick="() => ActivateAdmin(admin)">Activate</button>
+                            <button class="btn btn-success btn-sm" @onclick="() => ActivateAdmin(admin)">Reactivate</button>
                         }
                     </td>
                 </tr>
@@ -101,7 +101,7 @@ else
                             <option value="0">-- Select School --</option>
                             @foreach (var school in schools ?? new List<School>())
                             {
-                                <option value="@school.SchoolId">@school.Name</option>
+                                <option value="@school.SchoolId">@school.Name (@school.Code)</option>
                             }
                         </select>
                     </div>
@@ -158,7 +158,14 @@ else
                 </div>
                 <div class="modal-body">
                     <p>Are you sure you want to deactivate <strong>@adminToDeactivate.Fullname</strong>?</p>
-                    <p class="text-warning">They will no longer be able to log in.</p>
+                    <p class="text-warning">
+                        <strong>Note:</strong> Deactivating will:
+                        <ul>
+                            <li>Prevent this admin from logging in</li>
+                            <li>Keep all account data intact</li>
+                            <li>Allow reactivation later if needed</li>
+                        </ul>
+                    </p>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => adminToDeactivate = null">Cancel</button>
@@ -202,7 +209,11 @@ else
             admin.School = await DbContext.Schools.FirstOrDefaultAsync(s => s.SchoolId == admin.SchoolId);
         }
 
-        schools = await DbContext.Schools.AsNoTracking().OrderBy(s => s.Name).ToListAsync();
+        schools = await DbContext.Schools
+            .AsNoTracking()
+            .Where(s => s.IsActive)
+            .OrderBy(s => s.Name)
+            .ToListAsync();
     }
 
     private void ShowAddAdminModal()
@@ -230,6 +241,14 @@ else
             if (existingUser != null)
             {
                 modalError = "Email already in use.";
+                return;
+            }
+
+            // Verify school exists and is active
+            var school = await DbContext.Schools.FindAsync(newAdminSchoolId);
+            if (school == null || !school.IsActive)
+            {
+                modalError = "Selected school is invalid or inactive.";
                 return;
             }
 
@@ -333,7 +352,7 @@ else
         {
             admin.IsActive = true;
             await UserManager.UpdateAsync(admin);
-            successMessage = $"{admin.Fullname} has been activated.";
+            successMessage = $"{admin.Fullname} has been reactivated.";
             await LoadData();
         }
         catch (Exception ex)

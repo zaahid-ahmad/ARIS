@@ -57,7 +57,14 @@ else
                     </td>
                     <td>
                         <button class="btn btn-info btn-sm" @onclick="() => EditSchool(school)">Edit</button>
-                        <button class="btn btn-danger btn-sm" @onclick="() => DeleteSchool(school)">Delete</button>
+                        @if (school.IsActive)
+                        {
+                            <button class="btn btn-danger btn-sm" @onclick="() => ShowDeactivateSchoolConfirm(school)">Deactivate</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="() => ReactivateSchool(school)">Reactivate</button>
+                        }
                     </td>
                 </tr>
             }
@@ -86,7 +93,11 @@ else
                     </div>
                     <div class="mb-3">
                         <label>School Code</label>
-                        <input class="form-control" @bind="newSchool.Code" placeholder="e.g. CHS001" />
+                        <input class="form-control" @bind="newSchool.Code" @bind:after="ValidateCodeUniqueness" placeholder="e.g. CHS001" />
+                        @if (!string.IsNullOrEmpty(codeError))
+                        {
+                            <small class="text-danger">@codeError</small>
+                        }
                     </div>
                     <div class="mb-3">
                         <label>Email</label>
@@ -100,16 +111,6 @@ else
                         <label>Address</label>
                         <textarea class="form-control" @bind="newSchool.Address"></textarea>
                     </div>
-                    @if (isEditMode)
-                    {
-                        <div class="mb-3">
-                            <label>Status</label>
-                            <select class="form-control" @bind="newSchool.IsActive">
-                                <option value="true">Active</option>
-                                <option value="false">Inactive</option>
-                            </select>
-                        </div>
-                    }
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => showSchoolModal = false">Cancel</button>
@@ -120,22 +121,29 @@ else
     </div>
 }
 
-<!-- DELETE CONFIRMATION MODAL -->
-@if (schoolToDelete != null)
+<!-- DEACTIVATE CONFIRMATION MODAL -->
+@if (schoolToDeactivate != null)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Confirm Delete</h5>
+                    <h5 class="modal-title">Confirm Deactivate</h5>
                 </div>
                 <div class="modal-body">
-                    <p>Are you sure you want to delete <strong>@schoolToDelete.Name</strong>?</p>
-                    <p class="text-danger">This cannot be undone.</p>
+                    <p>Are you sure you want to deactivate <strong>@schoolToDeactivate.Name</strong>?</p>
+                    <p class="text-warning">
+                        <strong>Note:</strong> Deactivating will:
+                        <ul>
+                            <li>Lock out all users in this school</li>
+                            <li>Prevent access to subjects and data</li>
+                            <li>Keep all data intact for reactivation</li>
+                        </ul>
+                    </p>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" @onclick="() => schoolToDelete = null">Cancel</button>
-                    <button class="btn btn-danger" @onclick="ConfirmDeleteSchool">Delete</button>
+                    <button class="btn btn-secondary" @onclick="() => schoolToDeactivate = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDeactivateSchool">Deactivate</button>
                 </div>
             </div>
         </div>
@@ -144,13 +152,14 @@ else
 
 @code {
     private List<School>? schools;
-    private School? schoolToDelete;
+    private School? schoolToDeactivate;
     private School newSchool = new();
     private bool showSchoolModal = false;
     private bool isEditMode = false;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private string modalError = string.Empty;
+    private string codeError = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -171,6 +180,7 @@ else
         isEditMode = false;
         showSchoolModal = true;
         modalError = string.Empty;
+        codeError = string.Empty;
     }
 
     private void EditSchool(School school)
@@ -188,6 +198,23 @@ else
         isEditMode = true;
         showSchoolModal = true;
         modalError = string.Empty;
+        codeError = string.Empty;
+    }
+
+    private async Task ValidateCodeUniqueness()
+    {
+        codeError = string.Empty;
+        if (string.IsNullOrWhiteSpace(newSchool.Code)) return;
+
+        var exists = await DbContext.Schools
+            .AsNoTracking()
+            .AnyAsync(s => s.Code.ToUpper() == newSchool.Code.ToUpper() && 
+                          s.SchoolId != newSchool.SchoolId);
+
+        if (exists)
+        {
+            codeError = "This school code is already in use.";
+        }
     }
 
     private async Task SaveSchool()
@@ -199,6 +226,12 @@ else
         if (string.IsNullOrWhiteSpace(newSchool.Name) || string.IsNullOrWhiteSpace(newSchool.Code))
         {
             modalError = "School name and code are required.";
+            return;
+        }
+
+        await ValidateCodeUniqueness();
+        if (!string.IsNullOrEmpty(codeError))
+        {
             return;
         }
 
@@ -214,7 +247,6 @@ else
                     existing.Email = newSchool.Email;
                     existing.Phone = newSchool.Phone;
                     existing.Address = newSchool.Address;
-                    existing.IsActive = newSchool.IsActive;
                     existing.LastModifiedDate = DateTime.UtcNow;
 
                     DbContext.Schools.Update(existing);
@@ -225,6 +257,7 @@ else
             {
                 newSchool.CreatedDate = DateTime.UtcNow;
                 newSchool.LastModifiedDate = DateTime.UtcNow;
+                newSchool.IsActive = true;
                 DbContext.Schools.Add(newSchool);
                 successMessage = "School created!";
             }
@@ -239,30 +272,53 @@ else
         }
     }
 
-    private void DeleteSchool(School school)
+    private void ShowDeactivateSchoolConfirm(School school)
     {
-        schoolToDelete = school;
+        schoolToDeactivate = school;
     }
 
-    private async Task ConfirmDeleteSchool()
+    private async Task ConfirmDeactivateSchool()
     {
-        if (schoolToDelete == null) return;
+        if (schoolToDeactivate == null) return;
 
         try
         {
-            var school = await DbContext.Schools.FindAsync(schoolToDelete.SchoolId);
+            var school = await DbContext.Schools.FindAsync(schoolToDeactivate.SchoolId);
             if (school != null)
             {
-                DbContext.Schools.Remove(school);
+                school.IsActive = false;
+                school.LastModifiedDate = DateTime.UtcNow;
+                DbContext.Schools.Update(school);
                 await DbContext.SaveChangesAsync();
-                successMessage = "School deleted!";
-                schoolToDelete = null;
+                successMessage = $"{school.Name} has been deactivated.";
+                schoolToDeactivate = null;
                 await LoadSchools();
             }
         }
         catch (Exception ex)
         {
-            errorMessage = $"Error deleting school: {ex.Message}";
+            errorMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task ReactivateSchool(School school)
+    {
+        try
+        {
+            var schoolToReactivate = await DbContext.Schools.FindAsync(school.SchoolId);
+            if (schoolToReactivate != null)
+            {
+                schoolToReactivate.IsActive = true;
+                schoolToReactivate.LastModifiedDate = DateTime.UtcNow;
+                DbContext.Schools.Update(schoolToReactivate);
+                await DbContext.SaveChangesAsync();
+                successMessage = $"{schoolToReactivate.Name} has been reactivated.";
+                await LoadSchools();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
         }
     }
 }
