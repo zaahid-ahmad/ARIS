@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
 @using ARIS1.Data
+@using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = "Learner")]
 @rendermode InteractiveServer
@@ -11,6 +12,11 @@
 @inject AuthenticationStateProvider AuthStateProvider
 
 <h2>My Profile</h2>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
 
 <div class="row mb-4">
     <div class="col-md-6">
@@ -31,6 +37,14 @@ else
 {
     @foreach (var subject in subjects)
     {
+        var subjectMarks = subjectMarksCache.ContainsKey(subject.SubjectId)
+            ? subjectMarksCache[subject.SubjectId]
+            : new List<LearnerMark>();
+
+        var subjectAttendance = attendanceCache.ContainsKey(subject.SubjectId)
+            ? attendanceCache[subject.SubjectId]
+            : new List<AttendanceRecord>();
+
         <div class="card mb-3">
             <div class="card-header">
                 <h5>@subject.Name (Grade @subject.Grade)</h5>
@@ -39,16 +53,7 @@ else
                 <div class="row">
                     <div class="col-md-6">
                         <h6>Marks</h6>
-                        @{
-                            var marks = DbContext.LearnerMarks
-                                .AsNoTracking()
-                                .Where(m => m.Assessment.SubjectId == subject.SubjectId &&
-                                           m.LearnerId == currentLearner!.LearnerId &&
-                                           !m.IsAbsent)
-                                .Include(m => m.Assessment)
-                                .ToList();
-                        }
-                        @if (marks.Count == 0)
+                        @if (subjectMarks.Count == 0)
                         {
                             <p class="text-muted">No marks yet.</p>
                         }
@@ -62,7 +67,7 @@ else
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach (var mark in marks)
+                                    @foreach (var mark in subjectMarks)
                                     {
                                         var percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
                                         <tr>
@@ -72,28 +77,20 @@ else
                                     }
                                 </tbody>
                             </table>
-                            <p><strong>Average: @marks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100).ToString("F1")%</strong></p>
+                            <p><strong>Average: @subjectMarks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100).ToString("F1")%</strong></p>
                         }
                     </div>
                     <div class="col-md-6">
                         <h6>Attendance</h6>
-                        @{
-                            var attendanceRecords = DbContext.AttendanceRecords
-                                .AsNoTracking()
-                                .Where(ar => ar.Session.SubjectId == subject.SubjectId &&
-                                           ar.LearnerId == currentLearner!.LearnerId)
-                                .Include(ar => ar.Session)
-                                .ToList();
-                        }
-                        @if (attendanceRecords.Count == 0)
+                        @if (subjectAttendance.Count == 0)
                         {
                             <p class="text-muted">No attendance records yet.</p>
                         }
                         else
                         {
-                            int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
-                            float attendancePercentage = (presentCount * 100f) / attendanceRecords.Count;
-                            <p>Present: @presentCount / @attendanceRecords.Count (@attendancePercentage.ToString("F1")%)</p>
+                            int presentCount = subjectAttendance.Count(ar => ar.Status == "Present");
+                            float attendancePercentage = (presentCount * 100f) / subjectAttendance.Count;
+                            <p>Present: @presentCount / @subjectAttendance.Count (@attendancePercentage.ToString("F1")%)</p>
                             <table class="table table-sm">
                                 <thead>
                                     <tr>
@@ -102,7 +99,7 @@ else
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach (var record in attendanceRecords.OrderByDescending(ar => ar.Session.Date))
+                                    @foreach (var record in subjectAttendance.OrderByDescending(ar => ar.Session.Date))
                                     {
                                         <tr>
                                             <td>@record.Session.Date.ToString("dd MMM yyyy")</td>
@@ -118,28 +115,70 @@ else
         </div>
     }
 }
+
 @code {
     private Learner? currentLearner;
     private List<Subject> subjects = new();
+    private Dictionary<int, List<LearnerMark>> subjectMarksCache = new();
+    private Dictionary<int, List<AttendanceRecord>> attendanceCache = new();
+    private string errorMessage = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
-
-        currentLearner = await DbContext.Learners
-            .AsNoTracking()
-            .Include(l => l.User)
-            .FirstOrDefaultAsync(l => l.UserId == user!.Id);
-
-        if (currentLearner != null)
+        try
         {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+            currentLearner = await DbContext.Learners
+                .AsNoTracking()
+                .Include(l => l.User)
+                .FirstOrDefaultAsync(l => l.UserId == user!.Id);
+
+            if (currentLearner == null)
+            {
+                errorMessage = "You are not registered as a learner.";
+                return;
+            }
+
             subjects = await DbContext.LearnerSubjects
                 .AsNoTracking()
                 .Where(ls => ls.LearnerId == currentLearner.LearnerId)
                 .Include(ls => ls.Subject)
                 .Select(ls => ls.Subject)
                 .ToListAsync();
+
+            // Load all marks for this learner at once
+            var allMarks = await DbContext.LearnerMarks
+                .AsNoTracking()
+                .Where(m => m.LearnerId == currentLearner.LearnerId && !m.IsAbsent)  // ← Filter by learner
+                .Include(m => m.Assessment)
+                .ToListAsync();
+
+            foreach (var subject in subjects)
+            {
+                subjectMarksCache[subject.SubjectId] = allMarks
+                    .Where(m => m.Assessment.SubjectId == subject.SubjectId)
+                    .ToList();
+            }
+
+            // Load all attendance for this learner at once
+            var allAttendance = await DbContext.AttendanceRecords
+                .AsNoTracking()
+                .Where(ar => ar.LearnerId == currentLearner.LearnerId)  // ← Filter by learner
+                .Include(ar => ar.Session)
+                .ToListAsync();
+
+            foreach (var subject in subjects)
+            {
+                attendanceCache[subject.SubjectId] = allAttendance
+                    .Where(ar => ar.Session.SubjectId == subject.SubjectId)
+                    .ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading profile: {ex.Message}";
         }
     }
 }

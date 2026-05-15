@@ -24,11 +24,9 @@ else
 {
     @foreach (var subject in subjects)
     {
-        var attendanceRecords = DbContext.AttendanceRecords
-            .AsNoTracking()
+        var attendanceRecords = allAttendanceRecords  // ← Use pre-loaded data
             .Where(ar => ar.Session.SubjectId == subject.SubjectId &&
                        ar.LearnerId == currentLearner!.LearnerId)
-            .Include(ar => ar.Session)
             .ToList();
 
         <div class="card mb-3">
@@ -77,6 +75,7 @@ else
 @code {
     private Learner? currentLearner;
     private List<Subject>? subjects;
+    private List<AttendanceRecord> allAttendanceRecords = new();  // ← Added this
 
     protected override async Task OnInitializedAsync()
     {
@@ -95,6 +94,13 @@ else
                 .Where(ls => ls.LearnerId == currentLearner.LearnerId)
                 .Include(ls => ls.Subject)
                 .Select(ls => ls.Subject)
+                .ToListAsync();
+
+            // Load ALL this learner's attendance records at once
+            allAttendanceRecords = await DbContext.AttendanceRecords
+                .AsNoTracking()
+                .Where(ar => ar.LearnerId == currentLearner.LearnerId)  // ← Filter by learner
+                .Include(ar => ar.Session)
                 .ToListAsync();
         }
     }

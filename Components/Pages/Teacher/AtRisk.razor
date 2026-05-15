@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
 @using ARIS1.Data
+@using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = "Teacher")]
 @rendermode InteractiveServer
@@ -12,6 +13,11 @@
 @inject NavigationManager Navigation
 
 <h2>At-Risk Learners</h2>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
 
 @if (subjects == null)
 {
@@ -91,6 +97,8 @@ else
     private int selectedSubjectId = 0;
     private bool hasLoaded = false;
     private Teacher? currentTeacher;
+    private int? currentSchoolId;
+    private string errorMessage = string.Empty;
 
     private class RiskData
     {
@@ -108,62 +116,89 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
-
-        currentTeacher = await DbContext.Teachers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.UserId == user!.Id);
-
-        if (currentTeacher != null)
+        try
         {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+            currentTeacher = await DbContext.Teachers
+                .AsNoTracking()
+                .Include(t => t.User)
+                .FirstOrDefaultAsync(t => t.UserId == user!.Id);
+
+            if (currentTeacher == null)
+            {
+                errorMessage = "You are not registered as a teacher.";
+                return;
+            }
+
+            currentSchoolId = currentTeacher.User?.SchoolId;
+
+            if (currentSchoolId == null)
+            {
+                errorMessage = "You are not assigned to a school.";
+                return;
+            }
+
+            // Only load subjects from this teacher's school
             subjects = await DbContext.Subjects
                 .AsNoTracking()
-                .Where(s => s.TeacherId == currentTeacher.TeacherId)
+                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)  // ← Filter by school
                 .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
         }
     }
 
     private async Task LoadAtRiskLearners()
     {
-        if (selectedSubjectId == 0) return;
-
-        hasLoaded = false;
-        learnerRiskCache.Clear();
-        atRiskLearners.Clear();
-
-        atRiskLearners = await DbContext.LearnerSubjects
-            .AsNoTracking()
-            .Where(ls => ls.SubjectId == selectedSubjectId)
-            .Include(ls => ls.Learner)
-            .ThenInclude(l => l.User)
-            .Select(ls => ls.Learner)
-            .ToListAsync();
-
-        // Pre-calculate all risk data
-        foreach (var learner in atRiskLearners)
+        try
         {
-            var riskData = CalculateRiskScore(learner);
-            learnerRiskCache[learner.LearnerId] = riskData;
+            if (selectedSubjectId == 0) return;
+
+            hasLoaded = false;
+            learnerRiskCache.Clear();
+            atRiskLearners.Clear();
+
+            atRiskLearners = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.SubjectId == selectedSubjectId)
+                .Include(ls => ls.Learner)
+                .ThenInclude(l => l.User)
+                .Select(ls => ls.Learner)
+                .ToListAsync();
+
+            // Pre-calculate all risk data
+            foreach (var learner in atRiskLearners)
+            {
+                var riskData = await CalculateRiskScore(learner);
+                learnerRiskCache[learner.LearnerId] = riskData;
+            }
+
+            // Filter to only at-risk learners
+            atRiskLearners = atRiskLearners
+                .Where(l => learnerRiskCache[l.LearnerId].Score >= 45)
+                .ToList();
+
+            hasLoaded = true;
         }
-
-        // Filter to only at-risk learners
-        atRiskLearners = atRiskLearners
-            .Where(l => learnerRiskCache[l.LearnerId].Score >= 45)
-            .ToList();
-
-        hasLoaded = true;
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading at-risk learners: {ex.Message}";
+        }
     }
 
-    private RiskData CalculateRiskScore(Learner learner)
+    private async Task<RiskData> CalculateRiskScore(Learner learner)
     {
         var riskData = new RiskData();
 
         // Calculate attendance percentage
-        var attendanceRecords = DbContext.AttendanceRecords
+        var attendanceRecords = await DbContext.AttendanceRecords
             .AsNoTracking()
             .Where(ar => ar.LearnerId == learner.LearnerId)
-            .ToList();
+            .ToListAsync();
 
         int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
         riskData.AttendancePercentage = attendanceRecords.Count > 0
@@ -171,11 +206,11 @@ else
             : 100;
 
         // Calculate academic average
-        var marks = DbContext.LearnerMarks
+        var marks = await DbContext.LearnerMarks
             .AsNoTracking()
             .Where(m => m.Assessment.SubjectId == selectedSubjectId && m.LearnerId == learner.LearnerId && !m.IsAbsent)
             .Include(m => m.Assessment)
-            .ToList();
+            .ToListAsync();
 
         if (marks.Count == 0)
         {

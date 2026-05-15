@@ -4,6 +4,7 @@
 @using ARIS1.Models
 @using ARIS1.Data
 @using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
 @attribute [Authorize(Roles = "Learner")]
 @rendermode InteractiveServer
 @inject UserManager<User> UserManager

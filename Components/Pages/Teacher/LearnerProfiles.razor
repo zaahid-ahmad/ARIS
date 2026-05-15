@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
 @using ARIS1.Data
+@using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = "Teacher,Admin")]
 @rendermode InteractiveServer
@@ -11,6 +12,11 @@
 @inject AuthenticationStateProvider AuthStateProvider
 
 <h2>Learner Profiles</h2>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
 
 <div class="mb-3 mt-3 d-flex gap-2">
     <input class="form-control" placeholder="Search by name..."
@@ -62,6 +68,7 @@ else
                     <h5 class="modal-title">
                         @selectedLearner.User?.Fullname — Grade @selectedLearner.Grade
                     </h5>
+                    <button type="button" class="btn-close" @onclick="() => selectedLearner = null"></button>
                 </div>
                 <div class="modal-body">
                     <h5>Interventions by Subject</h5>
@@ -139,54 +146,88 @@ else
 @code {
     [SupplyParameterFromQuery(Name = "learner")]
     public int LearnerIdFromQuery { get; set; }
+    
     private List<Learner> allLearners = new();
     private List<Learner> filteredLearners = new();
     private List<Subject> learnerSubjects = new();
     private List<Intervention> learnerInterventions = new();
     private Learner? selectedLearner;
     private string searchTerm = string.Empty;
+    private string errorMessage = string.Empty;
     private Teacher? currentTeacher;
+    private int? currentSchoolId;
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
-        var isAdmin = authState.User.IsInRole("Admin");
-
-        if (isAdmin)
+        try
         {
-            allLearners = await DbContext.Learners
-                .AsNoTracking()
-                .Include(l => l.User)
-                .ToListAsync();
-        }
-        else
-        {
-            currentTeacher = await DbContext.Teachers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(t => t.UserId == user!.Id);
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+            var isAdmin = authState.User.IsInRole("Admin");
 
-            if (currentTeacher != null)
+            if (isAdmin)
             {
+                // Admin can see all learners in their school
+                var adminUser = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+                currentSchoolId = adminUser?.SchoolId;
+
+                if (currentSchoolId == null)
+                {
+                    errorMessage = "You are not assigned to a school.";
+                    return;
+                }
+
+                allLearners = await DbContext.Learners
+                    .AsNoTracking()
+                    .Include(l => l.User)
+                    .Where(l => l.User.SchoolId == currentSchoolId)  // ← Filter by school
+                    .ToListAsync();
+            }
+            else
+            {
+                // Teacher can only see learners they teach
+                currentTeacher = await DbContext.Teachers
+                    .AsNoTracking()
+                    .Include(t => t.User)
+                    .FirstOrDefaultAsync(t => t.UserId == user!.Id);
+
+                if (currentTeacher == null)
+                {
+                    errorMessage = "You are not registered as a teacher.";
+                    return;
+                }
+
+                currentSchoolId = currentTeacher.User?.SchoolId;
+
+                if (currentSchoolId == null)
+                {
+                    errorMessage = "You are not assigned to a school.";
+                    return;
+                }
+
                 allLearners = await DbContext.LearnerSubjects
                     .AsNoTracking()
-                    .Where(ls => ls.Subject.TeacherId == currentTeacher.TeacherId)
+                    .Where(ls => ls.Subject.TeacherId == currentTeacher.TeacherId && ls.Subject.SchoolId == currentSchoolId)  // ← Filter by school
                     .Include(ls => ls.Learner)
                     .ThenInclude(l => l.User)
                     .Select(ls => ls.Learner)
                     .Distinct()
                     .ToListAsync();
             }
+
+            filteredLearners = allLearners;
+
+            // Auto-open profile if learner ID is passed from At-Risk page
+            if (LearnerIdFromQuery > 0)
+            {
+                var learner = allLearners.FirstOrDefault(l => l.LearnerId == LearnerIdFromQuery);
+                if (learner != null)
+                    await ViewProfile(learner);
+            }
         }
-
-        filteredLearners = allLearners;
-
-        // Auto-open profile if learner ID is passed from At-Risk page
-        if (LearnerIdFromQuery > 0)
+        catch (Exception ex)
         {
-            var learner = allLearners.FirstOrDefault(l => l.LearnerId == LearnerIdFromQuery);
-            if (learner != null)
-                await ViewProfile(learner);
+            errorMessage = $"Error: {ex.Message}";
         }
     }
 
@@ -211,22 +252,29 @@ else
 
     private async Task ViewProfile(Learner learner)
     {
-        selectedLearner = learner;
+        try
+        {
+            selectedLearner = learner;
 
-        learnerSubjects = await DbContext.LearnerSubjects
-            .AsNoTracking()
-            .Where(ls => ls.LearnerId == learner.LearnerId)
-            .Include(ls => ls.Subject)
-            .Select(ls => ls.Subject)
-            .ToListAsync();
+            learnerSubjects = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.LearnerId == learner.LearnerId)
+                .Include(ls => ls.Subject)
+                .Select(ls => ls.Subject)
+                .ToListAsync();
 
-        learnerInterventions = await DbContext.Interventions
-            .AsNoTracking()
-            .Where(i => i.LearnerId == learner.LearnerId)
-            .Include(i => i.Question)
-            .ThenInclude(q => q.Assessment)
-            .OrderBy(i => i.Question.Assessment.Term)
-            .ThenBy(i => i.Level)
-            .ToListAsync();
+            learnerInterventions = await DbContext.Interventions
+                .AsNoTracking()
+                .Where(i => i.LearnerId == learner.LearnerId)
+                .Include(i => i.Question)
+                .ThenInclude(q => q.Assessment)
+                .OrderBy(i => i.Question.Assessment.Term)
+                .ThenBy(i => i.Level)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading profile: {ex.Message}";
+        }
     }
 }

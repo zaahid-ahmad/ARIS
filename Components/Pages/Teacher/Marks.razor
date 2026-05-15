@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
 @using ARIS1.Data
+@using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
 @using ARIS1.Services
 @attribute [Authorize(Roles = "Teacher")]
@@ -139,26 +140,47 @@
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private Teacher? currentTeacher;
+    private int? currentSchoolId;
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
-
-        currentTeacher = await DbContext.Teachers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.UserId == user!.Id);
-
-        if (currentTeacher != null)
+        try
         {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+            currentTeacher = await DbContext.Teachers
+                .AsNoTracking()
+                .Include(t => t.User)
+                .FirstOrDefaultAsync(t => t.UserId == user!.Id);
+
+            if (currentTeacher == null)
+            {
+                errorMessage = "You are not registered as a teacher.";
+                return;
+            }
+
+            currentSchoolId = currentTeacher.User?.SchoolId;
+
+            if (currentSchoolId == null)
+            {
+                errorMessage = "You are not assigned to a school.";
+                return;
+            }
+
+            // Only load subjects from this teacher's school
             subjects = await DbContext.Subjects
                 .AsNoTracking()
-                .Where(s => s.TeacherId == currentTeacher.TeacherId)
+                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)  // ← Filter by school
                 .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
         }
     }
 
-    //validate marks
+    // Validate marks
     private void ValidateMark(int learnerId, AssessmentQuestion question)
     {
         var key = $"{learnerId}_{question.QuestionId}";
@@ -182,58 +204,76 @@
             return;
         }
 
-        errorMessage = string.Empty;
+        try
+        {
+            errorMessage = string.Empty;
 
-        learners = await DbContext.LearnerSubjects
-            .AsNoTracking()
-            .Where(ls => ls.SubjectId == selectedSubjectId)
-            .Include(ls => ls.Learner)
-            .ThenInclude(l => l.User)
-            .Select(ls => ls.Learner)
-            .ToListAsync();
+            // Load learners enrolled in this subject
+            learners = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.SubjectId == selectedSubjectId)
+                .Include(ls => ls.Learner)
+                .ThenInclude(l => l.User)
+                .Select(ls => ls.Learner)
+                .ToListAsync();
 
-        assessmentTypes = await DbContext.AssessmentTypes
-            .AsNoTracking()
-            .Where(at => at.SubjectId == selectedSubjectId)
-            .ToListAsync();
+            // Load assessment types for this subject
+            assessmentTypes = await DbContext.AssessmentTypes
+                .AsNoTracking()
+                .Where(at => at.SubjectId == selectedSubjectId)
+                .ToListAsync();
 
-        assessments = await DbContext.Assessments
-            .AsNoTracking()
-            .Where(a => a.SubjectId == selectedSubjectId)
-            .ToListAsync();
+            // Load assessments for this subject
+            assessments = await DbContext.Assessments
+                .AsNoTracking()
+                .Where(a => a.SubjectId == selectedSubjectId)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading subject data: {ex.Message}";
+        }
     }
 
     private async Task LoadQuestions()
     {
-        if (selectedAssessmentId == 0) return;
-
-        assessmentQuestions = await DbContext.AssessmentQuestions
-            .AsNoTracking()
-            .Where(q => q.AssessmentId == selectedAssessmentId)
-            .OrderBy(q => q.QuestionNumber)
-            .ToListAsync();
-
-        marks.Clear();
-
-        foreach (var learner in learners)
+        try
         {
-            foreach (var question in assessmentQuestions)
+            if (selectedAssessmentId == 0) return;
+
+            assessmentQuestions = await DbContext.AssessmentQuestions
+                .AsNoTracking()
+                .Where(q => q.AssessmentId == selectedAssessmentId)
+                .OrderBy(q => q.QuestionNumber)
+                .ToListAsync();
+
+            marks.Clear();
+
+            // Load existing marks for all learners and questions
+            foreach (var learner in learners)
             {
-                var key = $"{learner.LearnerId}_{question.QuestionId}";
-                var existing = await DbContext.LearnerQuestionMarks
+                foreach (var question in assessmentQuestions)
+                {
+                    var key = $"{learner.LearnerId}_{question.QuestionId}";
+                    var existing = await DbContext.LearnerQuestionMarks
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(m =>
+                            m.QuestionId == question.QuestionId &&
+                            m.LearnerId == learner.LearnerId);
+                    marks[key] = existing?.MarksAwarded ?? 0;
+                }
+
+                var absent = await DbContext.LearnerMarks
                     .AsNoTracking()
                     .FirstOrDefaultAsync(m =>
-                        m.QuestionId == question.QuestionId &&
+                        m.AssessmentId == selectedAssessmentId &&
                         m.LearnerId == learner.LearnerId);
-                marks[key] = existing?.MarksAwarded ?? 0;
+                isAbsent[learner.LearnerId] = absent?.IsAbsent ?? false;
             }
-
-            var absent = await DbContext.LearnerMarks
-                .AsNoTracking()
-                .FirstOrDefaultAsync(m =>
-                    m.AssessmentId == selectedAssessmentId &&
-                    m.LearnerId == learner.LearnerId);
-            isAbsent[learner.LearnerId] = absent?.IsAbsent ?? false;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading questions: {ex.Message}";
         }
     }
 
@@ -242,124 +282,131 @@
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
-        if (selectedAssessmentId == 0 || assessmentQuestions.Count == 0)
+        try
         {
-            errorMessage = "Please load questions first.";
-            return;
-        }
-
-        var selectedAssessment = assessments.FirstOrDefault(a => a.AssessmentId == selectedAssessmentId);
-        if (selectedAssessment == null)
-        {
-            errorMessage = "Assessment not found.";
-            return;
-        }
-
-        // Validate total marks per learner
-        foreach (var learner in learners)
-        {
-            if (isAbsent[learner.LearnerId]) continue;
-
-            float totalMarksEntered = 0;
-            foreach (var question in assessmentQuestions)
+            if (selectedAssessmentId == 0 || assessmentQuestions.Count == 0)
             {
-                var key = $"{learner.LearnerId}_{question.QuestionId}";
-                totalMarksEntered += marks[key];
-            }
-
-            if (totalMarksEntered > selectedAssessment.MaxMark)
-            {
-                errorMessage = $"Total marks for {learner.User?.Fullname} ({totalMarksEntered}) exceed the maximum ({selectedAssessment.MaxMark}).";
+                errorMessage = "Please load questions first.";
                 return;
             }
-        }
 
-        // Save question-level marks
-        foreach (var learner in learners)
-        {
-            foreach (var question in assessmentQuestions)
+            var selectedAssessment = assessments.FirstOrDefault(a => a.AssessmentId == selectedAssessmentId);
+            if (selectedAssessment == null)
             {
-                var key = $"{learner.LearnerId}_{question.QuestionId}";
-                var marksValue = marks[key];
+                errorMessage = "Assessment not found.";
+                return;
+            }
 
-                var existing = await DbContext.LearnerQuestionMarks
+            // Validate total marks per learner
+            foreach (var learner in learners)
+            {
+                if (isAbsent[learner.LearnerId]) continue;
+
+                float totalMarksEntered = 0;
+                foreach (var question in assessmentQuestions)
+                {
+                    var key = $"{learner.LearnerId}_{question.QuestionId}";
+                    totalMarksEntered += marks[key];
+                }
+
+                if (totalMarksEntered > selectedAssessment.MaxMark)
+                {
+                    errorMessage = $"Total marks for {learner.User?.Fullname} ({totalMarksEntered}) exceed the maximum ({selectedAssessment.MaxMark}).";
+                    return;
+                }
+            }
+
+            // Save question-level marks
+            foreach (var learner in learners)
+            {
+                foreach (var question in assessmentQuestions)
+                {
+                    var key = $"{learner.LearnerId}_{question.QuestionId}";
+                    var marksValue = marks[key];
+
+                    var existing = await DbContext.LearnerQuestionMarks
+                        .FirstOrDefaultAsync(m =>
+                            m.QuestionId == question.QuestionId &&
+                            m.LearnerId == learner.LearnerId);
+
+                    if (existing != null)
+                    {
+                        existing.MarksAwarded = marksValue;
+                        DbContext.LearnerQuestionMarks.Update(existing);
+                    }
+                    else
+                    {
+                        var mark = new LearnerQuestionMark
+                        {
+                            QuestionId = question.QuestionId,
+                            LearnerId = learner.LearnerId,
+                            MarksAwarded = marksValue
+                        };
+                        DbContext.LearnerQuestionMarks.Add(mark);
+                    }
+                }
+            }
+
+            await DbContext.SaveChangesAsync();
+
+            // Calculate and save overall assessment marks from question marks
+            foreach (var learner in learners)
+            {
+                float totalMarksAwarded = 0;
+                foreach (var question in assessmentQuestions)
+                {
+                    var key = $"{learner.LearnerId}_{question.QuestionId}";
+                    totalMarksAwarded += marks[key];
+                }
+
+                var existingAssessmentMark = await DbContext.LearnerMarks
                     .FirstOrDefaultAsync(m =>
-                        m.QuestionId == question.QuestionId &&
+                        m.AssessmentId == selectedAssessmentId &&
                         m.LearnerId == learner.LearnerId);
 
-                if (existing != null)
+                if (existingAssessmentMark != null)
                 {
-                    existing.MarksAwarded = marksValue;
-                    DbContext.LearnerQuestionMarks.Update(existing);
+                    existingAssessmentMark.MarksAwarded = totalMarksAwarded;
+                    existingAssessmentMark.IsAbsent = isAbsent[learner.LearnerId];
+                    DbContext.LearnerMarks.Update(existingAssessmentMark);
                 }
                 else
                 {
-                    var mark = new LearnerQuestionMark
+                    var assessmentMark = new LearnerMark
                     {
-                        QuestionId = question.QuestionId,
+                        AssessmentId = selectedAssessmentId,
                         LearnerId = learner.LearnerId,
-                        MarksAwarded = marksValue
+                        MarksAwarded = totalMarksAwarded,
+                        IsAbsent = isAbsent[learner.LearnerId]
                     };
-                    DbContext.LearnerQuestionMarks.Add(mark);
+                    DbContext.LearnerMarks.Add(assessmentMark);
                 }
             }
-        }
 
-        await DbContext.SaveChangesAsync();
+            await DbContext.SaveChangesAsync();
 
-        // Calculate and save overall assessment marks from question marks
-        foreach (var learner in learners)
-        {
-            float totalMarksAwarded = 0;
-            foreach (var question in assessmentQuestions)
+            // Generate interventions for each learner and question
+            foreach (var learner in learners)
             {
-                var key = $"{learner.LearnerId}_{question.QuestionId}";
-                totalMarksAwarded += marks[key];
-            }
+                if (isAbsent[learner.LearnerId]) continue;
 
-            var existingAssessmentMark = await DbContext.LearnerMarks
-                .FirstOrDefaultAsync(m =>
-                    m.AssessmentId == selectedAssessmentId &&
-                    m.LearnerId == learner.LearnerId);
-
-            if (existingAssessmentMark != null)
-            {
-                existingAssessmentMark.MarksAwarded = totalMarksAwarded;
-                existingAssessmentMark.IsAbsent = isAbsent[learner.LearnerId];
-                DbContext.LearnerMarks.Update(existingAssessmentMark);
-            }
-            else
-            {
-                var assessmentMark = new LearnerMark
+                foreach (var question in assessmentQuestions)
                 {
-                    AssessmentId = selectedAssessmentId,
-                    LearnerId = learner.LearnerId,
-                    MarksAwarded = totalMarksAwarded,
-                    IsAbsent = isAbsent[learner.LearnerId]
-                };
-                DbContext.LearnerMarks.Add(assessmentMark);
+                    var key = $"{learner.LearnerId}_{question.QuestionId}";
+                    await InterventionService.GenerateInterventions(
+                        learner.LearnerId,
+                        question.QuestionId,
+                        marks[key],
+                        question.MaxMark
+                    );
+                }
             }
+
+            successMessage = "Marks and interventions saved successfully!";
         }
-
-        await DbContext.SaveChangesAsync();
-
-        // Generate interventions for each learner and question
-        foreach (var learner in learners)
+        catch (Exception ex)
         {
-            if (isAbsent[learner.LearnerId]) continue;
-
-            foreach (var question in assessmentQuestions)
-            {
-                var key = $"{learner.LearnerId}_{question.QuestionId}";
-                await InterventionService.GenerateInterventions(
-                    learner.LearnerId,
-                    question.QuestionId,
-                    marks[key],
-                    question.MaxMark
-                );
-            }
+            errorMessage = $"Error saving marks: {ex.Message}";
         }
-
-        successMessage = "Marks and interventions saved successfully!";
     }
 }

@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
 @using ARIS1.Data
+@using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = "Learner")]
 @rendermode InteractiveServer
@@ -11,6 +12,11 @@
 @inject AuthenticationStateProvider AuthStateProvider
 
 <h2>My Marks</h2>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
 
 @if (subjects == null)
 {
@@ -70,19 +76,26 @@ else
     private Learner? currentLearner;
     private List<Subject>? subjects;
     private Dictionary<int, List<LearnerMark>> subjectMarksCache = new();
+    private string errorMessage = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
-
-        currentLearner = await DbContext.Learners
-            .AsNoTracking()
-            .Include(l => l.User)
-            .FirstOrDefaultAsync(l => l.UserId == user!.Id);
-
-        if (currentLearner != null)
+        try
         {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+            currentLearner = await DbContext.Learners
+                .AsNoTracking()
+                .Include(l => l.User)
+                .FirstOrDefaultAsync(l => l.UserId == user!.Id);
+
+            if (currentLearner == null)
+            {
+                errorMessage = "You are not registered as a learner.";
+                return;
+            }
+
             subjects = await DbContext.LearnerSubjects
                 .AsNoTracking()
                 .Where(ls => ls.LearnerId == currentLearner.LearnerId)
@@ -93,7 +106,7 @@ else
             // Pre-load all marks into cache
             var allMarks = await DbContext.LearnerMarks
                 .AsNoTracking()
-                .Where(m => m.LearnerId == currentLearner.LearnerId && !m.IsAbsent)
+                .Where(m => m.LearnerId == currentLearner.LearnerId && !m.IsAbsent)  // ← Filter by learner
                 .Include(m => m.Assessment)
                 .ToListAsync();
 
@@ -103,6 +116,10 @@ else
                     .Where(m => m.Assessment.SubjectId == subject.SubjectId)
                     .ToList();
             }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading marks: {ex.Message}";
         }
     }
 }
