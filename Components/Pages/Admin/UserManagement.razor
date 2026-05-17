@@ -173,7 +173,7 @@ else
         // Get current admin's school
         var currentUser = await UserManager.FindByNameAsync(userName);
         currentSchoolId = currentUser?.SchoolId;
-        currentUserId = currentUser?.Id;  // ← Add this line
+        currentUserId = currentUser?.Id;
 
         if (currentSchoolId == null)
         {
@@ -190,7 +190,7 @@ else
         {
             // ONLY load users from THIS school
             users = await DbContext.Users
-                .Where(u => u.SchoolId == currentSchoolId)  // ← Filter by school
+                .Where(u => u.SchoolId == currentSchoolId && u.Role !="Admin")  // Filter by school and not show admin account
                 .ToListAsync();
         }
         catch (Exception ex)
