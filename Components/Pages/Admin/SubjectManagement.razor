@@ -806,10 +806,29 @@ else
     {
         if (subjectToDelete != null)
         {
-            DbContext.Subjects.Remove(subjectToDelete);
-            await DbContext.SaveChangesAsync();
-            subjectToDelete = null;
-            await LoadData();
+            try
+            {
+                // Delete weighting structures first
+                var weightingStructures = await DbContext.WeightingStructures
+                    .Where(ws => ws.SubjectId == subjectToDelete.SubjectId)
+                    .ToListAsync();
+                DbContext.WeightingStructures.RemoveRange(weightingStructures);
+                await DbContext.SaveChangesAsync();
+
+                // Now delete the subject
+                DbContext.Subjects.Remove(subjectToDelete);
+                await DbContext.SaveChangesAsync();
+            
+                successMessage = "Subject deleted!";
+                subjectToDelete = null;
+                await LoadData();
+                OnGradeChanged();
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error deleting subject: {ex.Message}";
+                subjectToDelete = null;
+            }
         }
     }
 
