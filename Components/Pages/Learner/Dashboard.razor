@@ -31,7 +31,7 @@
         <div class="card text-white bg-success mb-3">
             <div class="card-body">
                 <h5 class="card-title">My Attendance</h5>
-                <p class="card-text">View your attendance record by subject.</p>
+                <p class="card-text">View your attendance records by subject.</p>
                 <button class="btn btn-light"
                         @onclick='() => Navigation.NavigateTo("/learner/attendance")'>
                     Go
@@ -43,9 +43,21 @@
         <div class="card text-white bg-info mb-3">
             <div class="card-body">
                 <h5 class="card-title">My Profile</h5>
-                <p class="card-text">View your full profile.</p>
+                <p class="card-text">View attendance & results by subject.</p>
                 <button class="btn btn-light"
                         @onclick='() => Navigation.NavigateTo("/learner/profile")'>
+                    Go
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- In Learner/Dashboard.razor, add this card -->
+    <div class="col-md-3">
+        <div class="card text-white bg-info mb-3">
+            <div class="card-body">
+                <h5 class="card-title">AI Support Hub</h5>
+                <p class="card-text">Get personalized study solutions.</p>
+                <button class="btn btn-light" @onclick='() => Navigation.NavigateTo("/learner/support")'>
                     Go
                 </button>
             </div>

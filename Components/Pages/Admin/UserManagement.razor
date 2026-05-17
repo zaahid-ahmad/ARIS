@@ -64,10 +64,14 @@ else
                     <td>
                         @if (user.IsActive)
                         {
-                            <button class="btn btn-warning btn-sm ms-1" @onclick="() => ShowResetPassword(user)">
+                            <button class="btn btn-warning btn-sm ms-1"
+                                    @onclick="() => ShowResetPassword(user)"
+                                    disabled="@(user.Id == currentUserId)">
                                 Reset Password
                             </button>
-                            <button class="btn btn-danger btn-sm" @onclick="() => ShowDeactivateConfirm(user)">
+                            <button class="btn btn-danger btn-sm"
+                                    @onclick="() => ShowDeactivateConfirm(user)"
+                                    disabled="@(user.Id == currentUserId)">
                                 Deactivate
                             </button>
                         }
@@ -146,6 +150,7 @@ else
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private int? currentSchoolId;
+    private string? currentUserId;
 
     private IEnumerable<User> FilteredUsers => users?
         .Where(u => string.IsNullOrWhiteSpace(searchTerm) ||
@@ -168,6 +173,7 @@ else
         // Get current admin's school
         var currentUser = await UserManager.FindByNameAsync(userName);
         currentSchoolId = currentUser?.SchoolId;
+        currentUserId = currentUser?.Id;  // ← Add this line
 
         if (currentSchoolId == null)
         {
@@ -204,6 +210,19 @@ else
         {
             try
             {
+                // Get current user from auth state
+                var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+                var currentUserName = authState.User.Identity?.Name;
+                var currentUser = await UserManager.FindByNameAsync(currentUserName!);
+            
+                // Check if admin is trying to deactivate themselves
+                if (currentUser?.Id == userToDeactivate.Id)
+                {
+                    errorMessage = "You cannot deactivate your own account.";
+                    userToDeactivate = null;
+                    return;
+                }
+
                 userToDeactivate.IsActive = false;
                 await UserManager.UpdateAsync(userToDeactivate);
                 successMessage = $"{userToDeactivate.Fullname} has been deactivated.";

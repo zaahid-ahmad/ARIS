@@ -1,0 +1,310 @@
+﻿@page "/learner/support"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Learner")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<h2>Learning Support Hub</h2>
+
+<button class="btn btn-secondary mb-3" @onclick='() => Navigation.NavigateTo("/learner/dashboard")'>
+    Back to Dashboard
+</button>
+
+<div class="row">
+    <!-- LEFT COLUMN: AREAS OF CONCERN -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5>Areas of Concern</h5>
+            </div>
+            <div class="card-body">
+                @if (areasOfConcern.Count == 0)
+                {
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle"></i> Great job! No areas of concern identified.
+                    </div>
+                }
+                else
+                {
+                    @foreach (var concern in areasOfConcern)
+                    {
+                        var alertClass = concern.Level == "Critical" ? "alert-danger" :
+                                        concern.Level == "High" ? "alert-warning" : "alert-info";
+                        
+                        <div class="alert @alertClass" style="cursor: pointer;" @onclick='() => SelectConcern(concern)'>
+                            <h6>@concern.Subject</h6>
+                            <p class="mb-1">@concern.Description</p>
+                            <small><strong>Level:</strong> @concern.Level</small>
+                        </div>
+                    }
+                }
+
+                <hr />
+                <div class="row mt-3">
+                    <div class="col-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h4>@averagePercentage.ToString("F1")%</h4>
+                                <small>Overall Average</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h4>@attendancePercentage.ToString("F1")%</h4>
+                                <small>Attendance</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT COLUMN: CHATBOT -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5>AI Learning Assistant</h5>
+                <small>Get personalized study tips</small>
+            </div>
+            <div class="card-body">
+                <!-- Chat Messages -->
+                <div style="height: 300px; overflow-y: auto; border: 1px solid #dee2e6; padding: 1rem; border-radius: 5px; margin-bottom: 1rem; background-color: #f8f9fa;">
+                    @if (messages.Count == 0)
+                    {
+                        <div class="mb-3">
+                            <div class="alert alert-info mb-2">
+                                <strong>Welcome!</strong> I'm your AI Learning Assistant. Select an area of concern from the left to get personalized study tips.
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var msg in messages)
+                        {
+                            @if (msg.Sender == "bot")
+                            {
+                                <div class="mb-2">
+                                    <div class="alert alert-info mb-1" style="word-wrap: break-word;">
+                                        <strong>Assistant:</strong> @msg.Text
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="mb-2">
+                                    <div class="alert alert-primary mb-1" style="word-wrap: break-word;">
+                                        <strong>You:</strong> @msg.Text
+                                    </div>
+                                </div>
+                            }
+                        }
+                    }
+
+                    @if (isTyping)
+                    {
+                        <div class="alert alert-info mb-1">
+                            <em>Assistant is typing...</em>
+                        </div>
+                    }
+                </div>
+
+                <!-- Solutions for Selected Concern -->
+                @if (selectedConcern != null)
+                {
+                    <div class="alert alert-warning mb-3">
+                        <h6>Suggested Solutions for @selectedConcern.Subject</h6>
+                        <ul class="mb-0">
+                            @foreach (var solution in selectedConcern.Solutions)
+                            {
+                                <li>
+                                    <button class="btn btn-link btn-sm text-left p-0" @onclick='() => SendMessage(solution)'>
+                                        @solution
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                }
+
+                <!-- Input Area -->
+                <div class="input-group">
+                    <input type="text"
+                           class="form-control"
+                           placeholder="Ask a question..."
+                           @bind="userInput"
+                           @onkeydown='async (KeyboardEventArgs e) => { if (e.Key == "Enter") await SendMessage(userInput); }'
+                           disabled="@isTyping" />
+                    <button class="btn btn-success" type="button" @onclick='() => SendMessage(userInput)' disabled="@isTyping">
+                        Send
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private Learner? currentLearner;
+    private List<ConcernItem> areasOfConcern = new();
+    private ConcernItem? selectedConcern;
+    private List<ChatMessage> messages = new();
+    private bool isTyping = false;
+    private string userInput = string.Empty;
+    private float averagePercentage = 0;
+    private float attendancePercentage = 0;
+
+    private class ChatMessage
+    {
+        public string Sender { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private class ConcernItem
+    {
+        public string Subject { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Level { get; set; } = string.Empty;
+        public List<string> Solutions { get; set; } = new();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+
+            currentLearner = await DbContext.Learners
+                .AsNoTracking()
+                .Include(l => l.User)
+                .FirstOrDefaultAsync(l => l.UserId == user!.Id);
+
+            if (currentLearner != null)
+            {
+                // Load interventions
+                var interventions = await DbContext.Interventions
+                    .AsNoTracking()
+                    .Where(i => i.LearnerId == currentLearner.LearnerId)
+                    .Include(i => i.Question)
+                    .ThenInclude(q => q.Assessment)
+                    .ThenInclude(a => a.Subject)
+                    .ToListAsync();
+
+                var subjectGroups = interventions
+                    .GroupBy(i => i.Question.Assessment.Subject.Name)
+                    .ToList();
+
+                foreach (var group in subjectGroups)
+                {
+                    var maxLevel = group.OrderByDescending(i => GetLevelScore(i.Level)).First();
+                    var topicCount = group.Select(i => i.Topic).Distinct().Count();
+
+                    areasOfConcern.Add(new ConcernItem
+                    {
+                        Subject = group.Key,
+                        Description = $"Struggling with {topicCount} topic(s)",
+                        Level = maxLevel.Level,
+                        Solutions = new()
+                        {
+                            "Review key concepts",
+                            "Practice targeted exercises",
+                            "Work through examples",
+                            "Request tutoring session",
+                            "Analyze weak areas"
+                        }
+                    });
+                }
+
+                // Calculate average
+                var marks = await DbContext.LearnerMarks
+                    .AsNoTracking()
+                    .Where(m => m.LearnerId == currentLearner.LearnerId && !m.IsAbsent)
+                    .Include(m => m.Assessment)
+                    .ToListAsync();
+
+                if (marks.Count > 0)
+                {
+                    averagePercentage = marks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100);
+                }
+
+                // Calculate attendance
+                var attendance = await DbContext.AttendanceRecords
+                    .AsNoTracking()
+                    .Where(a => a.LearnerId == currentLearner.LearnerId)
+                    .ToListAsync();
+
+                if (attendance.Count > 0)
+                {
+                    int present = attendance.Count(a => a.Status == "Present");
+                    attendancePercentage = (present * 100f) / attendance.Count;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
+    private int GetLevelScore(string level)
+    {
+        return level switch
+        {
+            "Critical" => 4,
+            "Attention" => 3,
+            "Focus" => 2,
+            "Minor" => 1,
+            _ => 0
+        };
+    }
+
+    private void SelectConcern(ConcernItem concern)
+    {
+        selectedConcern = concern;
+        AddMessage("bot", $"I see you're having challenges with {concern.Subject}. Here are some practical solutions to help you improve.");
+    }
+
+    private async Task SendMessage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        AddMessage("user", text);
+        userInput = string.Empty;
+        isTyping = true;
+
+        await Task.Delay(1000);
+
+        var response = GenerateBotResponse(text);
+        AddMessage("bot", response);
+        isTyping = false;
+    }
+
+    private void AddMessage(string sender, string text)
+    {
+        messages.Add(new ChatMessage { Sender = sender, Text = text });
+    }
+
+    private string GenerateBotResponse(string input)
+    {
+        var responses = new[]
+        {
+            "Great question! Start by reviewing the fundamentals, then practice with similar problems.",
+            "I understand. Break down the problem into smaller steps and practice consistently.",
+            "Excellent! Set a study schedule, focus on weak areas, and review regularly.",
+            "Good thinking! Review the core concepts first, then apply them to practice problems.",
+            "Remember, improvement takes time and effort. Let's work through this together!"
+        };
+
+        return responses[new Random().Next(responses.Length)];
+    }
+}
