@@ -27,14 +27,40 @@
     <div class="alert alert-success">@successMessage</div>
 }
 
+<!-- FILTER BY GRADE -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5>Filter Subjects</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="mb-3">
+                            <label>Select Grade</label>
+                            <select class="form-control" @bind="selectedGrade" @bind:after="OnGradeChanged">
+                                <option value="0">-- All Grades --</option>
+                                <option value="10">Grade 10</option>
+                                <option value="11">Grade 11</option>
+                                <option value="12">Grade 12</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- MAIN SUBJECTS TABLE -->
-@if (subjects == null)
+@if (filteredSubjects == null)
 {
     <p>Loading...</p>
 }
-else if (subjects.Count == 0)
+else if (filteredSubjects.Count == 0)
 {
-    <p class="text-muted">No subjects yet.</p>
+    <p class="text-muted">No subjects for this grade.</p>
 }
 else
 {
@@ -49,7 +75,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var subject in subjects)
+            @foreach (var subject in filteredSubjects)
             {
                 <tr>
                     <td>@subject.Name</td>
@@ -576,7 +602,8 @@ else
 <!-- CODE SECTION -->
 @code {
     // State
-    private List<Subject>? subjects;
+    private List<Subject>? allSubjects;
+    private List<Subject>? filteredSubjects;
     private List<Teacher>? teachers;
     private List<AssessmentType> assessmentTypes = new();
     private List<Assessment> assessments = new();
@@ -586,6 +613,7 @@ else
     // UI State
     private bool showCreateForm = false;
     private bool showAssessmentTypes = false;
+    private int selectedGrade = 0;
 
     // Selected Items
     private Subject? selectedSubject;
@@ -672,19 +700,34 @@ else
     private async Task LoadData()
     {
         // ONLY load subjects from this school
-        subjects = await DbContext.Subjects
+        allSubjects = await DbContext.Subjects
             .AsNoTracking()
             .Include(s => s.Teacher)
             .ThenInclude(t => t.User)
-            .Where(s => s.SchoolId == currentSchoolId)  // ← Filter by school
+            .Where(s => s.SchoolId == currentSchoolId)
             .ToListAsync();
+
+        filteredSubjects = allSubjects;
 
         // ONLY load teachers from this school
         teachers = await DbContext.Teachers
             .AsNoTracking()
             .Include(t => t.User)
-            .Where(t => t.User.SchoolId == currentSchoolId)  // ← Filter by school
+            .Where(t => t.User.SchoolId == currentSchoolId)
             .ToListAsync();
+    }
+
+    private void OnGradeChanged()
+    {
+        // Filter subjects by selected grade
+        if (selectedGrade == 0)
+        {
+            filteredSubjects = allSubjects;
+        }
+        else
+        {
+            filteredSubjects = allSubjects?.Where(s => s.Grade == selectedGrade).ToList();
+        }
     }
 
     // ===== SUBJECT CRUD =====
@@ -705,7 +748,7 @@ else
             Grade = grade,
             TeacherId = teacherId,
             AcademicYear = academicYear,
-            SchoolId = currentSchoolId.Value  // ← Assign to admin's school
+            SchoolId = currentSchoolId.Value
         };
 
         DbContext.Subjects.Add(subject);
@@ -790,7 +833,7 @@ else
     {
         assessmentTypes = await DbContext.AssessmentTypes
             .AsNoTracking()
-            .Where(at => at.Subject!.SchoolId == currentSchoolId && at.SubjectId == selectedSubject!.SubjectId)  // ← Filter by school
+            .Where(at => at.Subject!.SchoolId == currentSchoolId && at.SubjectId == selectedSubject!.SubjectId)
             .ToListAsync();
     }
 
@@ -820,13 +863,11 @@ else
         newTypeName = string.Empty;
         newTypeTerm = 1;
     
-        // Refresh both lists
         await LoadAssessmentTypes();
     
-        // If we're currently viewing this term's weights, refresh them too
         if (selectedWeightTerm == newTypeTerm)
         {
-            weightingStructure = null; // Clear cache
+            weightingStructure = null;
             await LoadWeightingStructure();
         }
     }
@@ -845,13 +886,11 @@ else
             var typeToDelete = await DbContext.AssessmentTypes.FindAsync(assessmentTypeToDelete.AssessmentTypeId);
             if (typeToDelete != null)
             {
-                // DELETE WEIGHTING NODES FIRST
                 var weightingNodes = await DbContext.WeightingNodes
                     .Where(wn => wn.AssessmentTypeId == assessmentTypeToDelete.AssessmentTypeId)
                     .ToListAsync();
                 DbContext.WeightingNodes.RemoveRange(weightingNodes);
 
-                // Then delete related assessments
                 var relatedAssessments = await DbContext.Assessments
                     .Where(a => a.AssessmentTypeId == assessmentTypeToDelete.AssessmentTypeId)
                     .ToListAsync();
@@ -883,11 +922,9 @@ else
                 assessmentTypeSuccess = "Type deleted!";
                 assessmentTypeToDelete = null;
             
-                // Refresh everything
                 await LoadAssessmentTypes();
                 await LoadAssessments();
             
-                // Force refresh of current weights view
                 weightingStructure = null;
                 await LoadWeightingStructure();
             }
@@ -909,7 +946,7 @@ else
         assessments = await DbContext.Assessments
             .AsNoTracking()
             .Include(a => a.AssessmentType)
-            .Where(a => a.Subject!.SchoolId == currentSchoolId && a.SubjectId == selectedSubject!.SubjectId)  // ← Filter by school
+            .Where(a => a.Subject!.SchoolId == currentSchoolId && a.SubjectId == selectedSubject!.SubjectId)
             .ToListAsync();
     }
 
@@ -1098,7 +1135,6 @@ else
                 return;
             }
 
-            // Load structure with nodes
             weightingStructure = await DbContext.WeightingStructures
                 .AsNoTracking()
                 .Include(ws => ws.RootNodes)
@@ -1106,7 +1142,6 @@ else
                     ws.SubjectId == selectedSubject.SubjectId &&
                     ws.Term == selectedWeightTerm);
 
-            // Get ALL assessment types for this term
             var allTypes = await DbContext.AssessmentTypes
                 .AsNoTracking()
                 .Where(at => at.SubjectId == selectedSubject.SubjectId && at.Term == selectedWeightTerm)
@@ -1114,13 +1149,11 @@ else
 
             if (weightingStructure != null)
             {
-                // Structure exists - check for NEW types that don't have nodes yet
                 var existingTypeIds = weightingStructure.RootNodes.Select(n => n.AssessmentTypeId).ToHashSet();
                 var missingTypes = allTypes.Where(t => !existingTypeIds.Contains(t.AssessmentTypeId)).ToList();
 
                 if (missingTypes.Count > 0)
                 {
-                    // Add nodes for new types
                     int maxOrder = weightingStructure.RootNodes.Any()
                         ? weightingStructure.RootNodes.Max(n => n.DisplayOrder) + 1
                         : 0;
@@ -1141,7 +1174,6 @@ else
 
                     await DbContext.SaveChangesAsync();
 
-                    // Reload from DB
                     weightingStructure = await DbContext.WeightingStructures
                         .AsNoTracking()
                         .Include(ws => ws.RootNodes)
@@ -1152,7 +1184,6 @@ else
             }
             else if (allTypes.Count > 0)
             {
-                // Create new structure from scratch
                 var newStructure = new WeightingStructure
                 {
                     SubjectId = selectedSubject.SubjectId,
@@ -1163,7 +1194,6 @@ else
                 DbContext.WeightingStructures.Add(newStructure);
                 await DbContext.SaveChangesAsync();
 
-                // Add nodes for all types
                 int order = 0;
                 foreach (var type in allTypes)
                 {
@@ -1180,7 +1210,6 @@ else
                 }
                 await DbContext.SaveChangesAsync();
 
-                // Reload from DB
                 weightingStructure = await DbContext.WeightingStructures
                     .AsNoTracking()
                     .Include(ws => ws.RootNodes)
@@ -1228,7 +1257,6 @@ else
 
             if (existing != null)
             {
-                // Update existing nodes
                 foreach (var node in weightingStructure.RootNodes)
                 {
                     var existingNode = existing.RootNodes.FirstOrDefault(n => n.AssessmentTypeId == node.AssessmentTypeId);
@@ -1239,7 +1267,6 @@ else
                     }
                     else
                     {
-                        // Node doesn't exist, create it
                         var newNode = new WeightingNode
                         {
                             WeightingStructureId = existing.WeightingStructureId,
@@ -1256,7 +1283,6 @@ else
             }
             else
             {
-                // Create new structure AND nodes
                 var newStructure = new WeightingStructure
                 {
                     SubjectId = selectedSubject.SubjectId,
@@ -1266,9 +1292,8 @@ else
                 };
 
                 DbContext.WeightingStructures.Add(newStructure);
-                await DbContext.SaveChangesAsync(); // Save structure first
+                await DbContext.SaveChangesAsync();
 
-                // Now add nodes
                 int order = 0;
                 foreach (var node in weightingStructure.RootNodes)
                 {
@@ -1289,7 +1314,6 @@ else
             await DbContext.SaveChangesAsync();
             weightSuccess = "Weights saved!";
         
-            // Refresh
             weightingStructure = null;
             await LoadWeightingStructure();
         }

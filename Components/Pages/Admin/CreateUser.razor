@@ -45,6 +45,18 @@
                 <option value="Learner">Learner</option>
             </select>
         </div>
+
+        @if (role == "Learner")
+        {
+            <div class="mb-3">
+                <label>Grade</label>
+                <select class="form-control" @bind="grade">
+                    <option value="10">Grade 10</option>
+                    <option value="11">Grade 11</option>
+                    <option value="12">Grade 12</option>
+                </select>
+            </div>
+        }
         <button class="btn btn-primary" @onclick="CreateUserAsync">Create User</button>
         <button class="btn btn-secondary ms-2" @onclick='() => Navigation.NavigateTo("/admin/users")'>Cancel</button>
     </div>
@@ -55,6 +67,7 @@
     private string email = string.Empty;
     private string password = string.Empty;
     private string role = string.Empty;
+    private string grade = "10";  // ← Add this
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
 
@@ -70,6 +83,13 @@
             string.IsNullOrWhiteSpace(role))
         {
             errorMessage = "Please fill in all fields.";
+            return;
+        }
+
+        // Validate grade for learners
+        if (role == "Learner" && string.IsNullOrWhiteSpace(grade))
+        {
+            errorMessage = "Please select a grade for learners.";
             return;
         }
 
@@ -139,7 +159,7 @@
                     var learner = new Learner
                     {
                         UserId = user.Id,
-                        Grade = 10,
+                        Grade = int.Parse(grade),  // ← Use selected grade
                         ClassName = "Unassigned",
                         EnrollmentYear = DateTime.Now.Year
                     };
@@ -152,6 +172,7 @@
                 email = string.Empty;
                 password = string.Empty;
                 role = string.Empty;
+                grade = "10";  // Reset grade
 
                 // Redirect back to users list after a short delay
                 await Task.Delay(1500);
