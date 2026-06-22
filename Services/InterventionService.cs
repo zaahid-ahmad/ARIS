@@ -28,7 +28,7 @@ namespace ARIS1.Services
             string message;
             string color;
 
-            if (percentage <= 40)
+            if (percentage <= 30)
             {
                 level = "Critical";
                 color = "red";
