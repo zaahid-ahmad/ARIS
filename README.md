@@ -56,10 +56,10 @@ The app opens in your browser at the address shown in the launch window
 
 The following accounts are created automatically on first run:
 
-| Role       | Email                   | Password          |
-|------------|-------------------------|-------------------|
-| SuperAdmin | superadmin@aris.com     | SuperAdmin@1234   |
-| Admin      | admin@aris.com          | Admin@1234        |
+| Role       | Email                   | Password          | School code	|
+|------------|-------------------------|-------------------|----------------|
+| SuperAdmin | superadmin@aris.com     | SuperAdmin@1234   | DEFAULT		|
+| Admin      | admin@aris.com          | Admin@1234        | DEFAULT		|
 
 - **SuperAdmin** manages schools and creates school administrators.
 - **Admin** manages users, subjects, assessments, and enrollment within their
