@@ -37,7 +37,7 @@ To build and run this project, the machine needs:
 ## How to Run
 
 1. Extract the submitted zip to a folder.
-2. Open **`ARIS1.sln`** in Visual Studio.
+2. Open **`ARIS1.slnx`** in Visual Studio.
 3. Wait for NuGet to restore packages (happens automatically on first open).
 4. Press **F5** (or click the green Run button).
 
