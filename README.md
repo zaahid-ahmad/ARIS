@@ -29,7 +29,7 @@ To build and run this project, the machine needs:
 
 > **Note on the .NET version:** .NET 10 is recent, so an older Visual Studio install
 > may not include it. If the solution fails to load or build with a message about the
-> target framework, update Visual Studio (or install the .NET 10 SDK from
+> target framework, update Visual Studio (or if using Visual Studio 2026, install the .NET 10 SDK from
 > https://dotnet.microsoft.com/download) and reopen.
 
 ---
@@ -39,7 +39,8 @@ To build and run this project, the machine needs:
 1. Extract the submitted zip to a folder.
 2. Open **`ARIS1.slnx`** in Visual Studio.
 3. Wait for NuGet to restore packages (happens automatically on first open).
-4. Press **F5** (or click the green Run button).
+4. Build the solution (press **Ctrl+Shift+B** or select **Build > Build Solution** from the menu).
+5. Press **F5** (or click the green Run button).
 
 On first launch the application **creates and seeds its own database
 automatically** — there is no manual database setup, no scripts to run, and no
