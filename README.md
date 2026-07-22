@@ -21,7 +21,7 @@ and automatic flagging of learners who need intervention.
 To build and run this project, the machine needs:
 
 - **.NET 10 SDK** — the project targets .NET 10 and will not build on earlier versions.
-- **Visual Studio 2022 (a recent update) or newer**, with the *ASP.NET and web
+- **Visual Studio 2026 (Visual Studio 18.0 or newer)**, with the *ASP.NET and web
   development* workload. A current Visual Studio install includes everything else
   needed, including **SQL Server LocalDB**, which the app uses for its database.
 - An **internet connection on first build**, so NuGet can restore the project's
