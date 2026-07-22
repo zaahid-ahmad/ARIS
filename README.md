@@ -58,7 +58,7 @@ The following accounts are created automatically on first run:
 
 | Role       | Email                   | Password          | School code	|
 |------------|-------------------------|-------------------|----------------|
-| SuperAdmin | superadmin@aris.com     | SuperAdmin@1234   | DEFAULT		|
+| SuperAdmin | superadmin@aris.com     | SuperAdmin@1234   | SUPERADMIN		|
 | Admin      | admin@aris.com          | Admin@1234        | DEFAULT		|
 
 - **SuperAdmin** manages schools and creates school administrators.
