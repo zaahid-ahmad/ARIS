@@ -363,10 +363,26 @@ else
 
     private string GenerateRandomPassword()
     {
-        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
+        const string lower = "abcdefghijkmnopqrstuvwxyz";
+        const string upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+        const string digits = "23456789";
+        const string symbols = "!@#$%";
+        const string all = lower + upper + digits + symbols;
+
         var random = new Random();
-        return new string(Enumerable.Range(0, 12)
-            .Select(_ => chars[random.Next(chars.Length)])
-            .ToArray());
+
+        // Guarantee the two enforced rules: at least one lowercase and one digit
+        var chars = new List<char>
+    {
+        lower[random.Next(lower.Length)],
+        digits[random.Next(digits.Length)]
+    };
+
+        // Fill the rest up to length 12 from the full set
+        while (chars.Count < 12)
+            chars.Add(all[random.Next(all.Length)]);
+
+        // Shuffle so the guaranteed characters aren't always in front
+        return new string(chars.OrderBy(_ => random.Next()).ToArray());
     }
 }
