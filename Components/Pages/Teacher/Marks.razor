@@ -249,25 +249,30 @@
 
             marks.Clear();
 
-            // Load existing marks for all learners and questions
+            var questionIds = assessmentQuestions.Select(q => q.QuestionId).ToList();
+            var learnerIds  = learners.Select(l => l.LearnerId).ToList();
+
+            var existingQuestionMarks = await DbContext.LearnerQuestionMarks
+                .AsNoTracking()
+                .Where(m => questionIds.Contains(m.QuestionId) && learnerIds.Contains(m.LearnerId))
+                .ToListAsync();
+
+            var existingAssessmentMarks = await DbContext.LearnerMarks
+                .AsNoTracking()
+                .Where(m => m.AssessmentId == selectedAssessmentId && learnerIds.Contains(m.LearnerId))
+                .ToListAsync();
+
             foreach (var learner in learners)
             {
                 foreach (var question in assessmentQuestions)
                 {
                     var key = $"{learner.LearnerId}_{question.QuestionId}";
-                    var existing = await DbContext.LearnerQuestionMarks
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(m =>
-                            m.QuestionId == question.QuestionId &&
-                            m.LearnerId == learner.LearnerId);
+                    var existing = existingQuestionMarks.FirstOrDefault(m =>
+                        m.QuestionId == question.QuestionId && m.LearnerId == learner.LearnerId);
                     marks[key] = existing?.MarksAwarded ?? 0;
                 }
 
-                var absent = await DbContext.LearnerMarks
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(m =>
-                        m.AssessmentId == selectedAssessmentId &&
-                        m.LearnerId == learner.LearnerId);
+                var absent = existingAssessmentMarks.FirstOrDefault(m => m.LearnerId == learner.LearnerId);
                 isAbsent[learner.LearnerId] = absent?.IsAbsent ?? false;
             }
         }
@@ -317,32 +322,34 @@
             }
 
             // Save question-level marks
+            var saveQuestionIds = assessmentQuestions.Select(q => q.QuestionId).ToList();
+            var saveLearnerIds  = learners.Select(l => l.LearnerId).ToList();
+
+            var existingQuestionMarksForSave = await DbContext.LearnerQuestionMarks
+                .Where(m => saveQuestionIds.Contains(m.QuestionId) && saveLearnerIds.Contains(m.LearnerId))
+                .ToListAsync();
+
             foreach (var learner in learners)
             {
                 foreach (var question in assessmentQuestions)
                 {
                     var key = $"{learner.LearnerId}_{question.QuestionId}";
-                    var marksValue = marks[key];
-
-                    var existing = await DbContext.LearnerQuestionMarks
-                        .FirstOrDefaultAsync(m =>
-                            m.QuestionId == question.QuestionId &&
-                            m.LearnerId == learner.LearnerId);
+                    var existing = existingQuestionMarksForSave.FirstOrDefault(m =>
+                        m.QuestionId == question.QuestionId && m.LearnerId == learner.LearnerId);
 
                     if (existing != null)
                     {
-                        existing.MarksAwarded = marksValue;
+                        existing.MarksAwarded = marks[key];
                         DbContext.LearnerQuestionMarks.Update(existing);
                     }
                     else
                     {
-                        var mark = new LearnerQuestionMark
+                        DbContext.LearnerQuestionMarks.Add(new LearnerQuestionMark
                         {
-                            QuestionId = question.QuestionId,
-                            LearnerId = learner.LearnerId,
-                            MarksAwarded = marksValue
-                        };
-                        DbContext.LearnerQuestionMarks.Add(mark);
+                            QuestionId   = question.QuestionId,
+                            LearnerId    = learner.LearnerId,
+                            MarksAwarded = marks[key]
+                        });
                     }
                 }
             }
@@ -350,36 +357,34 @@
             await DbContext.SaveChangesAsync();
 
             // Calculate and save overall assessment marks from question marks
+            var existingAssessmentMarksForSave = await DbContext.LearnerMarks
+                .Where(m => m.AssessmentId == selectedAssessmentId && saveLearnerIds.Contains(m.LearnerId))
+                .ToListAsync();
+
             foreach (var learner in learners)
             {
                 float totalMarksAwarded = 0;
                 foreach (var question in assessmentQuestions)
-                {
-                    var key = $"{learner.LearnerId}_{question.QuestionId}";
-                    totalMarksAwarded += marks[key];
-                }
+                    totalMarksAwarded += marks[$"{learner.LearnerId}_{question.QuestionId}"];
 
-                var existingAssessmentMark = await DbContext.LearnerMarks
-                    .FirstOrDefaultAsync(m =>
-                        m.AssessmentId == selectedAssessmentId &&
-                        m.LearnerId == learner.LearnerId);
+                var existingAssessmentMark = existingAssessmentMarksForSave
+                    .FirstOrDefault(m => m.LearnerId == learner.LearnerId);
 
                 if (existingAssessmentMark != null)
                 {
                     existingAssessmentMark.MarksAwarded = totalMarksAwarded;
-                    existingAssessmentMark.IsAbsent = isAbsent[learner.LearnerId];
+                    existingAssessmentMark.IsAbsent     = isAbsent[learner.LearnerId];
                     DbContext.LearnerMarks.Update(existingAssessmentMark);
                 }
                 else
                 {
-                    var assessmentMark = new LearnerMark
+                    DbContext.LearnerMarks.Add(new LearnerMark
                     {
                         AssessmentId = selectedAssessmentId,
-                        LearnerId = learner.LearnerId,
+                        LearnerId    = learner.LearnerId,
                         MarksAwarded = totalMarksAwarded,
-                        IsAbsent = isAbsent[learner.LearnerId]
-                    };
-                    DbContext.LearnerMarks.Add(assessmentMark);
+                        IsAbsent     = isAbsent[learner.LearnerId]
+                    });
                 }
             }
 
