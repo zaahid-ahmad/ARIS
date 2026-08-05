@@ -15,6 +15,8 @@ namespace ARIS1.Services
 
         public async Task GenerateInterventions(int learnerId, int questionId, float marksAwarded, float maxMark)
         {
+            if (maxMark <= 0) return;
+
             float percentage = (marksAwarded / maxMark) * 100;
 
             var question = await _dbContext.AssessmentQuestions
