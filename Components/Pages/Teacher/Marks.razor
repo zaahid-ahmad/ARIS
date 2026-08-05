@@ -1,4 +1,4 @@
-﻿@page "/teacher/marks"
+@page "/teacher/marks"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
@@ -8,6 +8,7 @@
 @using ARIS1.Services
 @attribute [Authorize(Roles = "Teacher")]
 @rendermode InteractiveServer
+@implements IDisposable
 @inject AppDbContext DbContext
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
@@ -17,24 +18,21 @@
 
 @if (!string.IsNullOrEmpty(errorMessage))
 {
-    <div class="alert alert-danger">@errorMessage</div>
-}
-@if (!string.IsNullOrEmpty(successMessage))
-{
-    <div class="alert alert-success">@successMessage</div>
+    <div class="alert alert-danger alert-dismissible">
+        @errorMessage
+        <button type="button" class="btn-close" @onclick="() => errorMessage = string.Empty"></button>
+    </div>
 }
 
 <div class="row mb-4">
     <div class="col-md-4">
         <div class="mb-3">
             <label>Select Subject</label>
-            <select class="form-control" @bind="selectedSubjectId">
+            <select class="form-control" @bind="selectedSubjectId" @bind:after="OnSubjectChanged">
                 <option value="0">-- Select Subject --</option>
                 @foreach (var subject in subjects)
                 {
-                    <option value="@subject.SubjectId">
-                        @subject.Name (Grade @subject.Grade)
-                    </option>
+                    <option value="@subject.SubjectId">@subject.Name (Grade @subject.Grade)</option>
                 }
             </select>
         </div>
@@ -44,90 +42,152 @@
 
 @if (selectedSubjectId > 0 && learners.Count > 0)
 {
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <h4>Assessments</h4>
-            @if (assessments.Count == 0)
-            {
-                <p class="text-muted">No assessments created yet.</p>
-            }
-            else
-            {
-                <div class="mb-3">
-                    <label>Select Assessment to Capture Marks</label>
-                    <select class="form-control" @bind="selectedAssessmentId">
-                        <option value="0">-- Select Assessment --</option>
-                        @foreach (var assessment in assessments)
-                        {
-                            <option value="@assessment.AssessmentId">
-                                @assessment.Title (Max: @assessment.MaxMark)
-                            </option>
-                        }
-                    </select>
-                    <button class="btn btn-primary mt-2" @onclick="LoadQuestions">
-                        Load Questions
-                    </button>
-                </div>
-            }
-        </div>
-    </div>
-
-    @if (selectedAssessmentId > 0 && assessmentQuestions.Count > 0)
+    <h4>Assessments</h4>
+    @if (assessments.Count == 0)
     {
-        <h4>Enter Marks by Question</h4>
-        <table class="table table-sm">
+        <p class="text-muted">No assessments created yet.</p>
+    }
+    else
+    {
+        <table class="table table-hover align-middle">
             <thead>
                 <tr>
-                    <th>Learner</th>
-                    @foreach (var question in assessmentQuestions)
-                    {
-                        <th>Q@(question.QuestionNumber) (@question.Topic) - @question.MaxMark</th>
-                    }
-                    <th>Total</th>
-                    <th>Absent</th>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th>Term</th>
+                    <th>Max Mark</th>
+                    <th>Date</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var learner in learners)
+                @foreach (var assessment in assessments)
                 {
                     <tr>
-                        <td>@learner.User?.Fullname</td>
-                        @foreach (var question in assessmentQuestions)
-                        {
-                            var key = $"{learner.LearnerId}_{question.QuestionId}";
-                            <td>
-                                <input type="number" class="form-control form-control-sm"
-                                       @bind="marks[key]"
-                                       @bind:after="() => ValidateMark(learner.LearnerId, question)"
-                                       disabled="@isAbsent[learner.LearnerId]"
-                                       max="@question.MaxMark" />
-                            </td>
-                        }
+                        <td>@assessment.Title</td>
+                        <td>@(assessmentTypes.FirstOrDefault(t => t.AssessmentTypeId == assessment.AssessmentTypeId)?.Name ?? "-")</td>
+                        <td>Term @assessment.Term</td>
+                        <td>@assessment.MaxMark</td>
+                        <td>@assessment.Date.ToString("dd MMM yyyy")</td>
                         <td>
-                            @{
-                                float total = 0;
-                                foreach (var question in assessmentQuestions)
-                                {
-                                    var key = $"{learner.LearnerId}_{question.QuestionId}";
-                                    total += marks[key];
-                                }
-                            }
-                            <strong>@total.ToString("F1")</strong>
-                        </td>
-                        <td>
-                            <input type="checkbox" @bind="isAbsent[learner.LearnerId]" />
+                            <button class="btn btn-sm btn-primary"
+                                    @onclick="() => OpenMarksModal(assessment)"
+                                    disabled="@isModalOpen">
+                                Capture Marks
+                            </button>
                         </td>
                     </tr>
                 }
             </tbody>
         </table>
-        <button class="btn btn-success mt-2" @onclick="SaveMarks">
-            Save Marks
-        </button>
     }
 }
 
+@if (isModalOpen && selectedAssessment != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-xl" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        Capture Marks — @selectedAssessment.Title
+                        <small class="text-muted ms-2">(Max: @selectedAssessment.MaxMark)</small>
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseMarksModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (assessmentQuestions.Count == 0)
+                    {
+                        <p class="text-muted">No questions have been added to this assessment.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Learner</th>
+                                        <th style="width: 90px;"></th>
+                                        @foreach (var question in assessmentQuestions)
+                                        {
+                                            <th class="text-center">
+                                                Q@(question.QuestionNumber)<br />
+                                                <small class="text-muted">@question.Topic</small><br />
+                                                <small class="text-muted">/ @question.MaxMark</small>
+                                            </th>
+                                        }
+                                        <th class="text-center">Total</th>
+                                        <th class="text-center">Absent</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var learner in learners)
+                                    {
+                                        <tr>
+                                            <td>@learner.User?.Fullname</td>
+                                            <td>
+                                                @{
+                                                    var status = learnerSaveStatus.GetValueOrDefault(learner.LearnerId, LearnerSaveStatus.Idle);
+                                                }
+                                                @if (status == LearnerSaveStatus.Saving)
+                                                {
+                                                    <span class="spinner-border spinner-border-sm text-secondary" role="status"></span>
+                                                }
+                                                else if (status == LearnerSaveStatus.Saved)
+                                                {
+                                                    <span class="badge bg-success">&#10003; Saved</span>
+                                                }
+                                                else if (status == LearnerSaveStatus.Error)
+                                                {
+                                                    <span class="badge bg-danger">Error</span>
+                                                }
+                                            </td>
+                                            @foreach (var question in assessmentQuestions)
+                                            {
+                                                var key = $"{learner.LearnerId}_{question.QuestionId}";
+                                                <td>
+                                                    <input type="number"
+                                                           class="form-control form-control-sm"
+                                                           style="width: 75px;"
+                                                           @bind="marks[key]"
+                                                           @bind:after="() => OnMarkChanged(learner.LearnerId, question)"
+                                                           disabled="@isAbsent[learner.LearnerId]"
+                                                           min="0"
+                                                           max="@question.MaxMark" />
+                                                </td>
+                                            }
+                                            <td class="text-center">
+                                                @{
+                                                    float total = 0;
+                                                    foreach (var q in assessmentQuestions)
+                                                        total += marks[$"{learner.LearnerId}_{q.QuestionId}"];
+                                                }
+                                                <strong>@total.ToString("F1")</strong>
+                                            </td>
+                                            <td class="text-center">
+                                                <input type="checkbox"
+                                                       @bind="isAbsent[learner.LearnerId]"
+                                                       @bind:after="() => OnAbsentChanged(learner.LearnerId)" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseMarksModal">Done</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
 @code {
+    private enum LearnerSaveStatus { Idle, Saving, Saved, Error }
+
     private List<Subject> subjects = new();
     private List<Learner> learners = new();
     private List<AssessmentType> assessmentTypes = new();
@@ -135,10 +195,13 @@
     private List<AssessmentQuestion> assessmentQuestions = new();
     private Dictionary<string, float> marks = new();
     private Dictionary<int, bool> isAbsent = new();
+    private Dictionary<int, LearnerSaveStatus> learnerSaveStatus = new();
+    private Dictionary<int, CancellationTokenSource> debounceCts = new();
+
     private int selectedSubjectId = 0;
-    private int selectedAssessmentId = 0;
+    private Assessment? selectedAssessment;
+    private bool isModalOpen = false;
     private string errorMessage = string.Empty;
-    private string successMessage = string.Empty;
     private Teacher? currentTeacher;
     private int? currentSchoolId;
 
@@ -168,10 +231,9 @@
                 return;
             }
 
-            // Only load subjects from this teacher's school
             subjects = await DbContext.Subjects
                 .AsNoTracking()
-                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)  // ← Filter by school
+                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)
                 .ToListAsync();
         }
         catch (Exception ex)
@@ -180,20 +242,12 @@
         }
     }
 
-    // Validate marks
-    private void ValidateMark(int learnerId, AssessmentQuestion question)
+    private void OnSubjectChanged()
     {
-        var key = $"{learnerId}_{question.QuestionId}";
-        if (marks[key] > question.MaxMark)
-        {
-            marks[key] = question.MaxMark;
-            errorMessage = $"Mark capped at {question.MaxMark} for {question.Topic}";
-        }
-        if (marks[key] < 0)
-        {
-            marks[key] = 0;
-            errorMessage = "Mark cannot be negative.";
-        }
+        if (isModalOpen) CloseMarksModal();
+        learners.Clear();
+        assessments.Clear();
+        assessmentTypes.Clear();
     }
 
     private async Task LoadSubjectData()
@@ -208,7 +262,6 @@
         {
             errorMessage = string.Empty;
 
-            // Load learners enrolled in this subject
             learners = await DbContext.LearnerSubjects
                 .AsNoTracking()
                 .Where(ls => ls.SubjectId == selectedSubjectId)
@@ -217,13 +270,11 @@
                 .Select(ls => ls.Learner)
                 .ToListAsync();
 
-            // Load assessment types for this subject
             assessmentTypes = await DbContext.AssessmentTypes
                 .AsNoTracking()
                 .Where(at => at.SubjectId == selectedSubjectId)
                 .ToListAsync();
 
-            // Load assessments for this subject
             assessments = await DbContext.Assessments
                 .AsNoTracking()
                 .Where(a => a.SubjectId == selectedSubjectId)
@@ -235,19 +286,23 @@
         }
     }
 
-    private async Task LoadQuestions()
+    private async Task OpenMarksModal(Assessment assessment)
     {
+        selectedAssessment = assessment;
+        assessmentQuestions.Clear();
+        marks.Clear();
+        isAbsent.Clear();
+        learnerSaveStatus.Clear();
+        CancelAllDebounces();
+        errorMessage = string.Empty;
+
         try
         {
-            if (selectedAssessmentId == 0) return;
-
             assessmentQuestions = await DbContext.AssessmentQuestions
                 .AsNoTracking()
-                .Where(q => q.AssessmentId == selectedAssessmentId)
+                .Where(q => q.AssessmentId == assessment.AssessmentId)
                 .OrderBy(q => q.QuestionNumber)
                 .ToListAsync();
-
-            marks.Clear();
 
             var questionIds = assessmentQuestions.Select(q => q.QuestionId).ToList();
             var learnerIds  = learners.Select(l => l.LearnerId).ToList();
@@ -259,7 +314,7 @@
 
             var existingAssessmentMarks = await DbContext.LearnerMarks
                 .AsNoTracking()
-                .Where(m => m.AssessmentId == selectedAssessmentId && learnerIds.Contains(m.LearnerId))
+                .Where(m => m.AssessmentId == assessment.AssessmentId && learnerIds.Contains(m.LearnerId))
                 .ToListAsync();
 
             foreach (var learner in learners)
@@ -274,68 +329,101 @@
 
                 var absent = existingAssessmentMarks.FirstOrDefault(m => m.LearnerId == learner.LearnerId);
                 isAbsent[learner.LearnerId] = absent?.IsAbsent ?? false;
+                learnerSaveStatus[learner.LearnerId] = LearnerSaveStatus.Idle;
             }
+
+            isModalOpen = true;
         }
         catch (Exception ex)
         {
-            errorMessage = $"Error loading questions: {ex.Message}";
+            errorMessage = $"Error loading assessment: {ex.Message}";
         }
     }
 
-    private async Task SaveMarks()
+    private void CloseMarksModal()
     {
-        errorMessage = string.Empty;
-        successMessage = string.Empty;
+        CancelAllDebounces();
+        isModalOpen = false;
+        selectedAssessment = null;
+        assessmentQuestions.Clear();
+        marks.Clear();
+        isAbsent.Clear();
+        learnerSaveStatus.Clear();
+    }
+
+    private void OnMarkChanged(int learnerId, AssessmentQuestion question)
+    {
+        ValidateMark(learnerId, question);
+        _ = DebounceAndSave(learnerId);
+    }
+
+    private void OnAbsentChanged(int learnerId)
+    {
+        _ = DebounceAndSave(learnerId);
+    }
+
+    private async Task DebounceAndSave(int learnerId)
+    {
+        if (debounceCts.TryGetValue(learnerId, out var existing))
+        {
+            existing.Cancel();
+            existing.Dispose();
+        }
+
+        var cts = new CancellationTokenSource();
+        debounceCts[learnerId] = cts;
 
         try
         {
-            if (selectedAssessmentId == 0 || assessmentQuestions.Count == 0)
+            await Task.Delay(800, cts.Token);
+            await SaveLearnerMarks(learnerId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer keystroke — no action needed
+        }
+    }
+
+    private async Task SaveLearnerMarks(int learnerId)
+    {
+        if (selectedAssessment == null) return;
+
+        // Validate total before saving
+        if (!isAbsent[learnerId])
+        {
+            float total = assessmentQuestions.Sum(q => marks[$"{learnerId}_{q.QuestionId}"]);
+            if (total > selectedAssessment.MaxMark)
             {
-                errorMessage = "Please load questions first.";
+                learnerSaveStatus[learnerId] = LearnerSaveStatus.Error;
+                errorMessage = $"Total marks ({total}) exceed the maximum of {selectedAssessment.MaxMark}.";
+                await InvokeAsync(StateHasChanged);
                 return;
             }
+        }
 
-            var selectedAssessment = assessments.FirstOrDefault(a => a.AssessmentId == selectedAssessmentId);
-            if (selectedAssessment == null)
-            {
-                errorMessage = "Assessment not found.";
-                return;
-            }
+        learnerSaveStatus[learnerId] = LearnerSaveStatus.Saving;
+        await InvokeAsync(StateHasChanged);
 
-            // Validate total marks per learner
-            foreach (var learner in learners)
-            {
-                if (isAbsent[learner.LearnerId]) continue;
+        try
+        {
+            var questionIds = assessmentQuestions.Select(q => q.QuestionId).ToList();
 
-                float totalMarksEntered = 0;
-                foreach (var question in assessmentQuestions)
-                {
-                    var key = $"{learner.LearnerId}_{question.QuestionId}";
-                    totalMarksEntered += marks[key];
-                }
-
-                if (totalMarksEntered > selectedAssessment.MaxMark)
-                {
-                    errorMessage = $"Total marks for {learner.User?.Fullname} ({totalMarksEntered}) exceed the maximum ({selectedAssessment.MaxMark}).";
-                    return;
-                }
-            }
-
-            // Save question-level marks
-            var saveQuestionIds = assessmentQuestions.Select(q => q.QuestionId).ToList();
-            var saveLearnerIds  = learners.Select(l => l.LearnerId).ToList();
-
-            var existingQuestionMarksForSave = await DbContext.LearnerQuestionMarks
-                .Where(m => saveQuestionIds.Contains(m.QuestionId) && saveLearnerIds.Contains(m.LearnerId))
+            var existingQuestionMarks = await DbContext.LearnerQuestionMarks
+                .Where(m => questionIds.Contains(m.QuestionId) && m.LearnerId == learnerId)
                 .ToListAsync();
 
-            foreach (var learner in learners)
+            var existingAssessmentMark = await DbContext.LearnerMarks
+                .FirstOrDefaultAsync(m =>
+                    m.AssessmentId == selectedAssessment.AssessmentId &&
+                    m.LearnerId == learnerId);
+
+            await using var transaction = await DbContext.Database.BeginTransactionAsync();
+            try
             {
                 foreach (var question in assessmentQuestions)
                 {
-                    var key = $"{learner.LearnerId}_{question.QuestionId}";
-                    var existing = existingQuestionMarksForSave.FirstOrDefault(m =>
-                        m.QuestionId == question.QuestionId && m.LearnerId == learner.LearnerId);
+                    var key = $"{learnerId}_{question.QuestionId}";
+                    var existing = existingQuestionMarks.FirstOrDefault(m => m.QuestionId == question.QuestionId);
 
                     if (existing != null)
                     {
@@ -347,71 +435,85 @@
                         DbContext.LearnerQuestionMarks.Add(new LearnerQuestionMark
                         {
                             QuestionId   = question.QuestionId,
-                            LearnerId    = learner.LearnerId,
+                            LearnerId    = learnerId,
                             MarksAwarded = marks[key]
                         });
                     }
                 }
-            }
 
-            await DbContext.SaveChangesAsync();
-
-            // Calculate and save overall assessment marks from question marks
-            var existingAssessmentMarksForSave = await DbContext.LearnerMarks
-                .Where(m => m.AssessmentId == selectedAssessmentId && saveLearnerIds.Contains(m.LearnerId))
-                .ToListAsync();
-
-            foreach (var learner in learners)
-            {
-                float totalMarksAwarded = 0;
-                foreach (var question in assessmentQuestions)
-                    totalMarksAwarded += marks[$"{learner.LearnerId}_{question.QuestionId}"];
-
-                var existingAssessmentMark = existingAssessmentMarksForSave
-                    .FirstOrDefault(m => m.LearnerId == learner.LearnerId);
+                float totalMarksAwarded = isAbsent[learnerId]
+                    ? 0
+                    : assessmentQuestions.Sum(q => marks[$"{learnerId}_{q.QuestionId}"]);
 
                 if (existingAssessmentMark != null)
                 {
                     existingAssessmentMark.MarksAwarded = totalMarksAwarded;
-                    existingAssessmentMark.IsAbsent     = isAbsent[learner.LearnerId];
+                    existingAssessmentMark.IsAbsent     = isAbsent[learnerId];
                     DbContext.LearnerMarks.Update(existingAssessmentMark);
                 }
                 else
                 {
                     DbContext.LearnerMarks.Add(new LearnerMark
                     {
-                        AssessmentId = selectedAssessmentId,
-                        LearnerId    = learner.LearnerId,
+                        AssessmentId = selectedAssessment.AssessmentId,
+                        LearnerId    = learnerId,
                         MarksAwarded = totalMarksAwarded,
-                        IsAbsent     = isAbsent[learner.LearnerId]
+                        IsAbsent     = isAbsent[learnerId]
                     });
                 }
-            }
 
-            await DbContext.SaveChangesAsync();
+                await DbContext.SaveChangesAsync();
 
-            // Generate interventions for each learner and question
-            foreach (var learner in learners)
-            {
-                if (isAbsent[learner.LearnerId]) continue;
-
-                foreach (var question in assessmentQuestions)
+                // InterventionService shares this DbContext (Scoped), so its
+                // SaveChangesAsync calls participate in the same transaction
+                if (!isAbsent[learnerId])
                 {
-                    var key = $"{learner.LearnerId}_{question.QuestionId}";
-                    await InterventionService.GenerateInterventions(
-                        learner.LearnerId,
-                        question.QuestionId,
-                        marks[key],
-                        question.MaxMark
-                    );
+                    foreach (var question in assessmentQuestions)
+                    {
+                        await InterventionService.GenerateInterventions(
+                            learnerId,
+                            question.QuestionId,
+                            marks[$"{learnerId}_{question.QuestionId}"],
+                            question.MaxMark
+                        );
+                    }
                 }
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
             }
 
-            successMessage = "Marks and interventions saved successfully!";
+            learnerSaveStatus[learnerId] = LearnerSaveStatus.Saved;
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
+            learnerSaveStatus[learnerId] = LearnerSaveStatus.Error;
             errorMessage = $"Error saving marks: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
         }
     }
+
+    private void ValidateMark(int learnerId, AssessmentQuestion question)
+    {
+        var key = $"{learnerId}_{question.QuestionId}";
+        if (marks[key] > question.MaxMark) marks[key] = question.MaxMark;
+        if (marks[key] < 0)               marks[key] = 0;
+    }
+
+    private void CancelAllDebounces()
+    {
+        foreach (var cts in debounceCts.Values)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+        debounceCts.Clear();
+    }
+
+    public void Dispose() => CancelAllDebounces();
 }
