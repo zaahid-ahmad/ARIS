@@ -1,15 +1,19 @@
 ﻿using ARIS1.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace ARIS1.Data
 {
     public static class DbSeeder
     {
-        public static async Task SeedAsync(IServiceProvider serviceProvider)
+        public static async Task SeedAsync(IServiceProvider serviceProvider, IConfiguration configuration)
         {
             var context = serviceProvider.GetRequiredService<AppDbContext>();
             var roleManager = serviceProvider.GetRequiredService<RoleManager<IdentityRole>>();
             var userManager = serviceProvider.GetRequiredService<UserManager<User>>();
+            var env = serviceProvider.GetRequiredService<IHostEnvironment>();
+            bool isDevelopment = env.IsDevelopment();
 
             // Create roles if they don't exist
             string[] roles = { "SuperAdmin", "Admin", "Teacher", "Learner" };
@@ -47,7 +51,12 @@ namespace ARIS1.Data
 
             // Create default SuperAdmin account if it doesn't exist
             string superAdminEmail = "superadmin@aris.com";
-            string superAdminPassword = "SuperAdmin@1234";
+            string superAdminPassword = configuration["SeedCredentials:SuperAdminPassword"]
+                ?? (isDevelopment
+                    ? "SuperAdmin@1234"
+                    : throw new InvalidOperationException(
+                        "SeedCredentials:SuperAdminPassword is not set. " +
+                        "Set the SEEDCREDENTIALS__SUPERADMINPASSWORD environment variable."));
 
             var existingSuperAdmin = await userManager.FindByEmailAsync(superAdminEmail);
             if (existingSuperAdmin == null)
@@ -69,7 +78,12 @@ namespace ARIS1.Data
 
             // Create default admin account if it doesn't exist
             string adminEmail = "admin@aris.com";
-            string adminPassword = "Admin@1234";
+            string adminPassword = configuration["SeedCredentials:AdminPassword"]
+                ?? (isDevelopment
+                    ? "Admin@1234"
+                    : throw new InvalidOperationException(
+                        "SeedCredentials:AdminPassword is not set. " +
+                        "Set the SEEDCREDENTIALS__ADMINPASSWORD environment variable."));
 
             var existingAdmin = await userManager.FindByEmailAsync(adminEmail);
             if (existingAdmin == null)

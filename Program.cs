@@ -84,7 +84,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();   // build the DB on a clean machine before seeding
-    await DbSeeder.SeedAsync(scope.ServiceProvider);
+    await DbSeeder.SeedAsync(scope.ServiceProvider, builder.Configuration);
 }
 
 app.Run();
