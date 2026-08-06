@@ -41,7 +41,7 @@ else
                 else
                 {
                     int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
-                    float attendancePercentage = (presentCount * 100f) / attendanceRecords.Count;
+                    decimal attendancePercentage = (presentCount * 100m) / attendanceRecords.Count;
                     
                     <p><strong>Attendance Rate: @attendancePercentage.ToString("F1")%</strong> (@presentCount / @attendanceRecords.Count present)</p>
                     

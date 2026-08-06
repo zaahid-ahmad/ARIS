@@ -11,7 +11,7 @@ namespace ARIS1.Models
         public int QuestionId { get; set; }
         public AssessmentQuestion Question { get; set; } = null!;
         public string Topic { get; set; } = string.Empty;
-        public float PercentageScore { get; set; }
+        public decimal PercentageScore { get; set; }
         public string Level { get; set; } = string.Empty; // Critical, Attention, Focus, Minor, WellDone
         public string Message { get; set; } = string.Empty;
         public DateTime CreatedDate { get; set; } = DateTime.Now;

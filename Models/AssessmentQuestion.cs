@@ -10,7 +10,7 @@ namespace ARIS1.Models
         public Assessment Assessment { get; set; } = null!;
         public int QuestionNumber { get; set; }
         public string Topic { get; set; } = string.Empty;
-        public float MaxMark { get; set; }
+        public decimal MaxMark { get; set; }
 
         public ICollection<LearnerQuestionMark> LearnerMarks { get; set; } = new List<LearnerQuestionMark>();
     }

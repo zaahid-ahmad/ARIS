@@ -18,7 +18,7 @@ namespace ARIS1.Models
         // "AssessmentType", "Assessment", "Custom", "Task"
 
         public string Name { get; set; } = string.Empty; // e.g., "SBA", "Task 1", "Paper 1"
-        public float Weighting { get; set; } // percentage at this level (0-100)
+        public decimal Weighting { get; set; } // percentage at this level (0-100)
         public int DisplayOrder { get; set; }
 
         // Optional link to actual AssessmentType (if NodeType == "AssessmentType")

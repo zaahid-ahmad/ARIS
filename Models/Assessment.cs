@@ -11,7 +11,7 @@ namespace ARIS1.Models
         public int SubjectId { get; set; }
         public Subject Subject { get; set; } = null!;
         public string Title { get; set; } = string.Empty;
-        public float MaxMark { get; set; }
+        public decimal MaxMark { get; set; }
         public DateTime Date { get; set; }
         public int Term { get; set; }
 

@@ -9,7 +9,7 @@ namespace ARIS1.Models
         public int SubjectId { get; set; }
         public Subject Subject { get; set; } = null!;
         public string Name { get; set; } = string.Empty; // e.g. "Term Test", "PAT", "Exam"
-        public float WeightPercentage { get; set; } // e.g. 25.0 for 25%
+        public decimal WeightPercentage { get; set; } // e.g. 25.0 for 25%
         public int Term { get; set; } // 1, 2, 3, or 4
 
         public ICollection<Assessment> Assessments { get; set; } = new List<Assessment>();

@@ -57,8 +57,8 @@ namespace ARIS1.Services
                 // Group assessments by AssessmentTypeId to calculate totals
                 var typeGroups = assessments.GroupBy(a => a.AssessmentTypeId).ToList();
 
-                float weightedTotal = 0f;
-                float totalWeight = 0f;
+                decimal weightedTotal = 0m;
+                decimal totalWeight = 0m;
                 bool hasMarks = false;
 
                 foreach (var typeGroup in typeGroups)
@@ -71,23 +71,23 @@ namespace ARIS1.Services
                     if (weightNode == null)
                         continue;
 
-                    float weight = weightNode.Weighting;
+                    decimal weight = weightNode.Weighting;
 
                     // Calculate total marks available for this assessment type
-                    float totalMarksForType = typeGroup.Sum(a => a.MaxMark);
+                    decimal totalMarksForType = typeGroup.Sum(a => a.MaxMark);
 
                     // Get learner's total marks for this assessment type
                     var marksForType = learnerMarks
                         .Where(m => m.Assessment.AssessmentTypeId == assessmentTypeId)
-                        .Sum(m => m.IsAbsent ? 0 : m.MarksAwarded);
+                        .Sum(m => m.IsAbsent ? 0m : m.MarksAwarded);
 
                     // Calculate percentage for this type
-                    float percentageForType = totalMarksForType > 0
-                        ? (marksForType / totalMarksForType) * 100f
-                        : 0f;
+                    decimal percentageForType = totalMarksForType > 0
+                        ? (marksForType / totalMarksForType) * 100m
+                        : 0m;
 
                     // Add to weighted total: (percentage × weight)
-                    float contributionToTerm = (percentageForType * weight) / 100f;
+                    decimal contributionToTerm = (percentageForType * weight) / 100m;
                     weightedTotal += contributionToTerm;
                     totalWeight += weight;
 
@@ -106,14 +106,14 @@ namespace ARIS1.Services
                 }
 
                 // Validate that weights sum to 100%
-                if (Math.Abs(totalWeight - 100f) > 0.01f)
+                if (Math.Abs(totalWeight - 100m) > 0.001m)
                 {
                     result.Error = $"Weights do not sum to 100% (Total: {totalWeight}%). Please fix the weighting structure.";
                     return result;
                 }
 
                 // Set results
-                result.WeightedPercentage = hasMarks ? weightedTotal : 0f;
+                result.WeightedPercentage = hasMarks ? weightedTotal : 0m;
                 result.APSLevel = GetAPSLevel(subjectId, result.WeightedPercentage);
                 result.IsSuccessful = true;
 
@@ -130,7 +130,7 @@ namespace ARIS1.Services
         /// Gets the APS level (0-7) based on percentage using the GradeBand configuration.
         /// Falls back to default bands if custom bands not configured.
         /// </summary>
-        private int GetAPSLevel(int subjectId, float percentage)
+        private int GetAPSLevel(int subjectId, decimal percentage)
         {
             // Try to find custom grade bands for this subject
             var gradeBand = _context.GradeBands
@@ -145,12 +145,12 @@ namespace ARIS1.Services
             // Fall back to default APS bands
             return percentage switch
             {
-                >= 80f => 7,
-                >= 70f => 6,
-                >= 60f => 5,
-                >= 50f => 4,
-                >= 40f => 3,
-                >= 30f => 2,
+                >= 80m => 7,
+                >= 70m => 6,
+                >= 60m => 5,
+                >= 50m => 4,
+                >= 40m => 3,
+                >= 30m => 2,
                 _ => 0
             };
         }
@@ -205,11 +205,11 @@ namespace ARIS1.Services
                     .Where(a => a.AssessmentTypeId == assessmentTypeId && a.Term == term)
                     .ToListAsync();
 
-                float totalMarks = assessments.Sum(a => a.MaxMark);
+                decimal totalMarks = assessments.Sum(a => a.MaxMark);
 
                 // Reasonable limit: allow up to 150% of what the weight suggests
                 // (weight 50% could have up to 75 marks out of 100 total)
-                float reasonableLimit = (weightNode.Weighting / 100f) * 150f;
+                decimal reasonableLimit = (weightNode.Weighting / 100m) * 150m;
 
                 if (totalMarks > reasonableLimit)
                 {
@@ -233,7 +233,7 @@ namespace ARIS1.Services
     /// </summary>
     public class WeightedTermResult
     {
-        public float WeightedPercentage { get; set; }
+        public decimal WeightedPercentage { get; set; }
         public int APSLevel { get; set; }
         public bool IsSuccessful { get; set; }
         public string? Error { get; set; }
@@ -248,11 +248,11 @@ namespace ARIS1.Services
     public class AssessmentTypeBreakdown
     {
         public string AssessmentTypeName { get; set; } = string.Empty;
-        public float Weight { get; set; }
-        public float TotalMarksAvailable { get; set; }
-        public float LearnerMarksEarned { get; set; }
-        public float PercentageForType { get; set; }
-        public float ContributionToTerm { get; set; }
+        public decimal Weight { get; set; }
+        public decimal TotalMarksAvailable { get; set; }
+        public decimal LearnerMarksEarned { get; set; }
+        public decimal PercentageForType { get; set; }
+        public decimal ContributionToTerm { get; set; }
     }
 
     /// <summary>

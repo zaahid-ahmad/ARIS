@@ -10,7 +10,7 @@ namespace ARIS1.Models
         public Assessment Assessment { get; set; } = null!;
         public int LearnerId { get; set; }
         public Learner Learner { get; set; } = null!;
-        public float MarksAwarded { get; set; }
+        public decimal MarksAwarded { get; set; }
         public bool IsAbsent { get; set; } = false;
     }
 }

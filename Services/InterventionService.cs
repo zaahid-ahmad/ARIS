@@ -13,11 +13,11 @@ namespace ARIS1.Services
             _dbContext = dbContext;
         }
 
-        public async Task GenerateInterventions(int learnerId, int questionId, float marksAwarded, float maxMark)
+        public async Task GenerateInterventions(int learnerId, int questionId, decimal marksAwarded, decimal maxMark)
         {
             if (maxMark <= 0) return;
 
-            float percentage = (marksAwarded / maxMark) * 100;
+            decimal percentage = (marksAwarded / maxMark) * 100m;
 
             var question = await _dbContext.AssessmentQuestions
                 .AsNoTracking()

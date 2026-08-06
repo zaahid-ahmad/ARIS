@@ -160,8 +160,8 @@
     private List<ChatMessage> messages = new();
     private bool isTyping = false;
     private string userInput = string.Empty;
-    private float averagePercentage = 0;
-    private float attendancePercentage = 0;
+    private decimal averagePercentage = 0m;
+    private decimal attendancePercentage = 0m;
 
     private class ChatMessage
     {
@@ -246,7 +246,7 @@
                 if (attendance.Count > 0)
                 {
                     int present = attendance.Count(a => a.Status == "Present");
-                    attendancePercentage = (present * 100f) / attendance.Count;
+                    attendancePercentage = (present * 100m) / attendance.Count;
                 }
             }
         }

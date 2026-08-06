@@ -61,7 +61,7 @@ namespace ARIS1.Services
 
             // Check root nodes sum to 100%
             var rootTotal = structure.RootNodes.Sum(n => n.Weighting);
-            if (Math.Abs(rootTotal - 100f) > 0.01f) // Allow small floating point differences
+            if (Math.Abs(rootTotal - 100m) > 0.001m) // Allow small rounding differences
             {
                 validation.IsValid = false;
                 validation.Message = $"Root nodes must sum to 100%. Current total: {rootTotal}%";
@@ -96,7 +96,7 @@ namespace ARIS1.Services
             }
 
             var childTotal = node.ChildNodes.Sum(n => n.Weighting);
-            if (Math.Abs(childTotal - 100f) > 0.01f)
+            if (Math.Abs(childTotal - 100m) > 0.001m)
             {
                 validation.IsValid = false;
                 validation.Message = $"Children of '{node.Name}' must sum to 100%. Current total: {childTotal}%";
@@ -116,7 +116,7 @@ namespace ARIS1.Services
         }
 
         // Create simple flat structure from assessment types
-        public async Task CreateSimpleWeighting(int subjectId, int term, Dictionary<int, float> typeWeights)
+        public async Task CreateSimpleWeighting(int subjectId, int term, Dictionary<int, decimal> typeWeights)
         {
             var structure = await GetOrCreateWeightingStructure(subjectId, term);
 

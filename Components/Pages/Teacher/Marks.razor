@@ -158,7 +158,7 @@
                                             }
                                             <td class="text-center">
                                                 @{
-                                                    float total = 0;
+                                                    decimal total = 0m;
                                                     foreach (var q in assessmentQuestions)
                                                         total += marks[$"{learner.LearnerId}_{q.QuestionId}"];
                                                 }
@@ -193,7 +193,7 @@
     private List<AssessmentType> assessmentTypes = new();
     private List<Assessment> assessments = new();
     private List<AssessmentQuestion> assessmentQuestions = new();
-    private Dictionary<string, float> marks = new();
+    private Dictionary<string, decimal> marks = new();
     private Dictionary<int, bool> isAbsent = new();
     private Dictionary<int, LearnerSaveStatus> learnerSaveStatus = new();
     private Dictionary<int, CancellationTokenSource> debounceCts = new();
@@ -391,7 +391,7 @@
         // Validate total before saving
         if (!isAbsent[learnerId])
         {
-            float total = assessmentQuestions.Sum(q => marks[$"{learnerId}_{q.QuestionId}"]);
+            decimal total = assessmentQuestions.Sum(q => marks[$"{learnerId}_{q.QuestionId}"]);
             if (total > selectedAssessment.MaxMark)
             {
                 learnerSaveStatus[learnerId] = LearnerSaveStatus.Error;
@@ -441,8 +441,8 @@
                     }
                 }
 
-                float totalMarksAwarded = isAbsent[learnerId]
-                    ? 0
+                decimal totalMarksAwarded = isAbsent[learnerId]
+                    ? 0m
                     : assessmentQuestions.Sum(q => marks[$"{learnerId}_{q.QuestionId}"]);
 
                 if (existingAssessmentMark != null)

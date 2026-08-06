@@ -103,9 +103,9 @@ else
     private class RiskData
     {
         public string Level { get; set; } = string.Empty;
-        public float Score { get; set; }
-        public float AttendancePercentage { get; set; }
-        public float AcademicAverage { get; set; }
+        public decimal Score { get; set; }
+        public decimal AttendancePercentage { get; set; }
+        public decimal AcademicAverage { get; set; }
         public string Intervention { get; set; } = string.Empty;
     }
 
@@ -202,8 +202,8 @@ else
 
         int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
         riskData.AttendancePercentage = attendanceRecords.Count > 0
-            ? (presentCount * 100f) / attendanceRecords.Count
-            : 100;
+            ? (presentCount * 100m) / attendanceRecords.Count
+            : 100m;
 
         // Calculate academic average
         var marks = await DbContext.LearnerMarks
@@ -218,10 +218,10 @@ else
         }
         else
         {
-            float totalPercentage = 0;
+            decimal totalPercentage = 0m;
             foreach (var mark in marks)
             {
-                float percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
+                decimal percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100m;
                 totalPercentage += percentage;
             }
             riskData.AcademicAverage = totalPercentage / marks.Count;
@@ -229,9 +229,9 @@ else
 
         // Calculate composite risk score
         // 60% academics + 30% attendance + 10% trend (simplified to 0 for now)
-        float academicFactor = 60 * (riskData.AcademicAverage / 100);
-        float attendanceFactor = 30 * (riskData.AttendancePercentage / 100);
-        float trendFactor = 10 * 0.5f;
+        decimal academicFactor = 60m * (riskData.AcademicAverage / 100m);
+        decimal attendanceFactor = 30m * (riskData.AttendancePercentage / 100m);
+        decimal trendFactor = 10m * 0.5m;
 
         riskData.Score = 100 - (academicFactor + attendanceFactor + trendFactor);
 

@@ -220,6 +220,43 @@ namespace ARIS1.Data
             builder.Entity<GradeBand>()
                 .HasIndex(gb => new { gb.SubjectId, gb.MinPercentage, gb.MaxPercentage });
 
+            // ===== DECIMAL COLUMN PRECISION =====
+            builder.Entity<Assessment>()
+                .Property(a => a.MaxMark)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<AssessmentQuestion>()
+                .Property(aq => aq.MaxMark)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<AssessmentType>()
+                .Property(at => at.WeightPercentage)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<LearnerMark>()
+                .Property(m => m.MarksAwarded)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<LearnerQuestionMark>()
+                .Property(lqm => lqm.MarksAwarded)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<WeightingNode>()
+                .Property(wn => wn.Weighting)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<GradeBand>()
+                .Property(gb => gb.MinPercentage)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<GradeBand>()
+                .Property(gb => gb.MaxPercentage)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<Intervention>()
+                .Property(i => i.PercentageScore)
+                .HasColumnType("decimal(10,4)");
+
             // Weighting Validation relationships
             builder.Entity<WeightingValidation>()
                 .HasOne(wv => wv.WeightingStructure)

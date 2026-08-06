@@ -262,8 +262,8 @@ else
         public string AssessmentTitle { get; set; } = string.Empty;
         public string AssessmentType { get; set; } = string.Empty;
         public int Term { get; set; }
-        public float MarksAwarded { get; set; }
-        public float MaxMark { get; set; }
+        public decimal MarksAwarded { get; set; }
+        public decimal MaxMark { get; set; }
     }
 
     protected override async Task OnInitializedAsync()
