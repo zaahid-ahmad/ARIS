@@ -26,10 +26,9 @@
         <label>Filter by Grade</label>
         <select class="form-control" value="@filterGrade" @onchange="OnGradeChanged">
             <option value="0">All Grades</option>
-            @foreach (var grade in grades)
-            {
-                <option value="@grade">Grade @grade</option>
-            }
+            <option value="10">Grade 10</option>
+            <option value="11">Grade 11</option>
+            <option value="12">Grade 12</option>
         </select>
     </div>
     <div class="col-md-3">
@@ -149,7 +148,6 @@ else
 
 @code {
     private List<Subject> subjects = new();
-    private List<int> grades = new();
     private List<Subject> subjectsForGrade = new();
     private List<AttendanceSession> sessions = new();
     private HashSet<int> expandedSessionIds = new();
@@ -195,7 +193,6 @@ else
                 .OrderBy(s => s.Grade).ThenBy(s => s.Name)
                 .ToListAsync();
 
-            grades = subjects.Select(s => s.Grade).Distinct().OrderBy(g => g).ToList();
             subjectsForGrade = subjects;
 
             await LoadSessions();
