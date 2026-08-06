@@ -57,7 +57,6 @@ namespace ARIS1.Data
                     UserName = superAdminEmail,
                     Email = superAdminEmail,
                     Fullname = "Super Administrator",
-                    Role = "SuperAdmin",
                     IsActive = true,
                     EmailConfirmed = true,
                     SchoolId = null // SuperAdmin doesn't belong to any school
@@ -83,7 +82,6 @@ namespace ARIS1.Data
                     UserName = adminEmail,
                     Email = adminEmail,
                     Fullname = "School Administrator",
-                    Role = "Admin",
                     IsActive = true,
                     EmailConfirmed = true,
                     SchoolId = defaultSchool.SchoolId // Admin belongs to default school
@@ -101,7 +99,7 @@ namespace ARIS1.Data
                     existingAdmin.EmailConfirmed = true;
                     await userManager.UpdateAsync(existingAdmin);
                 }
-                if (existingAdmin.SchoolId == null && existingAdmin.Role == "Admin")
+                if (existingAdmin.SchoolId == null && await userManager.IsInRoleAsync(existingAdmin, "Admin"))
                 {
                     var defaultSchool = context.Schools.First();
                     existingAdmin.SchoolId = defaultSchool.SchoolId;

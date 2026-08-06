@@ -81,7 +81,7 @@
             // Validate school code
             bool schoolCodeValid = false;
 
-            if (user.Role == "SuperAdmin")
+            if (await UserManager.IsInRoleAsync(user, "SuperAdmin"))
             {
                 // SuperAdmin must use "SUPERADMIN" as school code
                 schoolCodeValid = Input.SchoolCode.Equals("SUPERADMIN", StringComparison.OrdinalIgnoreCase);

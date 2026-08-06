@@ -59,7 +59,7 @@ else
                 <tr>
                     <td>@user.Fullname</td>
                     <td>@user.Email</td>
-                    <td>@user.Role</td>
+                    <td>@(userRoles.TryGetValue(user.Id, out var role) ? role : "-")</td>
                     <td>@(user.IsActive ? "Yes" : "No")</td>
                     <td>
                         @if (user.IsActive)
@@ -142,6 +142,7 @@ else
 
 @code {
     private List<User>? users;
+    private Dictionary<string, string> userRoles = new();
     private User? userToDeactivate;
     private User? userToReset;
     private string newPassword = string.Empty;
@@ -188,10 +189,30 @@ else
     {
         try
         {
-            // ONLY load users from THIS school
+            // Exclude admins from the list using the Identity UserRoles join
+            var adminRole = await DbContext.Roles.FirstOrDefaultAsync(r => r.Name == "Admin");
+            var adminUserIds = adminRole != null
+                ? await DbContext.UserRoles
+                    .Where(ur => ur.RoleId == adminRole.Id)
+                    .Select(ur => ur.UserId)
+                    .ToListAsync()
+                : new List<string>();
+
             users = await DbContext.Users
-                .Where(u => u.SchoolId == currentSchoolId && u.Role !="Admin")  // Filter by school and not show admin account
+                .Where(u => u.SchoolId == currentSchoolId && !adminUserIds.Contains(u.Id))
                 .ToListAsync();
+
+            // Batch-load roles for display
+            var userIds = users.Select(u => u.Id).ToList();
+            var allRoles = await DbContext.Roles.ToListAsync();
+            var userRoleRecords = await DbContext.UserRoles
+                .Where(ur => userIds.Contains(ur.UserId))
+                .ToListAsync();
+
+            userRoles = userRoleRecords.ToDictionary(
+                ur => ur.UserId,
+                ur => allRoles.FirstOrDefault(r => r.Id == ur.RoleId)?.Name ?? "-"
+            );
         }
         catch (Exception ex)
         {

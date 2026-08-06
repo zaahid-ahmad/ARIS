@@ -39,7 +39,7 @@ namespace ARIS1.Services
             var user = await _userManager.FindByNameAsync(userName);
 
             // SuperAdmin has access to all
-            if (user?.Role == "SuperAdmin")
+            if (user != null && await _userManager.IsInRoleAsync(user, "SuperAdmin"))
                 return true;
 
             // Others must belong to the school
