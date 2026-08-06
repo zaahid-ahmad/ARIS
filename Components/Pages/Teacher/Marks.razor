@@ -61,7 +61,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var assessment in assessments)
+                @foreach (var assessment in PagedAssessments)
                 {
                     <tr>
                         <td>@assessment.Title</td>
@@ -80,6 +80,7 @@
                 }
             </tbody>
         </table>
+        <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
     }
 }
 
@@ -211,6 +212,12 @@
     private Teacher? currentTeacher;
     private int? currentSchoolId;
 
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling(assessments.Count / (double)PageSize);
+    private List<Assessment> PagedAssessments => assessments.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -254,6 +261,7 @@
         learners.Clear();
         assessments.Clear();
         assessmentTypes.Clear();
+        currentPage = 1;
     }
 
     private async Task LoadSubjectData()

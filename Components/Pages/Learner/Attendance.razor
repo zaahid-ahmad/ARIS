@@ -22,9 +22,9 @@ else if (subjects.Count == 0)
 }
 else
 {
-    @foreach (var subject in subjects)
+    @foreach (var subject in PagedSubjects)
     {
-        var attendanceRecords = allAttendanceRecords  // ← Use pre-loaded data
+        var attendanceRecords = allAttendanceRecords
             .Where(ar => ar.Session.SubjectId == subject.SubjectId &&
                        ar.LearnerId == currentLearner!.LearnerId)
             .ToList();
@@ -42,9 +42,9 @@ else
                 {
                     int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
                     decimal attendancePercentage = (presentCount * 100m) / attendanceRecords.Count;
-                    
+
                     <p><strong>Attendance Rate: @attendancePercentage.ToString("F1")%</strong> (@presentCount / @attendanceRecords.Count present)</p>
-                    
+
                     <table class="table">
                         <thead>
                             <tr>
@@ -72,12 +72,19 @@ else
             </div>
         </div>
     }
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
 }
 
 @code {
     private Learner? currentLearner;
     private List<Subject>? subjects;
-    private List<AttendanceRecord> allAttendanceRecords = new();  // ← Added this
+    private List<AttendanceRecord> allAttendanceRecords = new();
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling((subjects?.Count ?? 0) / (double)PageSize);
+    private List<Subject> PagedSubjects => (subjects ?? new()).Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
 
     protected override async Task OnInitializedAsync()
     {

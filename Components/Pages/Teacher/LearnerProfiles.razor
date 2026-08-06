@@ -63,12 +63,12 @@ else
                 </tr>
             </thead>
             <tbody>
-                @foreach (var learner in filteredLearners)
+                @foreach (var learner in PagedLearners)
                 {
-                    var subjectCount = learnerSubjectsCache.ContainsKey(learner.LearnerId) 
-                        ? learnerSubjectsCache[learner.LearnerId].Count 
+                    var subjectCount = learnerSubjectsCache.ContainsKey(learner.LearnerId)
+                        ? learnerSubjectsCache[learner.LearnerId].Count
                         : 0;
-                    
+
                     <tr>
                         <td><strong>@learner.User?.Fullname</strong></td>
                         <td>
@@ -86,6 +86,7 @@ else
                 }
             </tbody>
         </table>
+        <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
     </div>
 }
 
@@ -253,6 +254,12 @@ else
     private int? currentSchoolId;
     private int selectedGrade = 0;
 
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling(filteredLearners.Count / (double)PageSize);
+    private List<Learner> PagedLearners => filteredLearners.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
+
     // Cache for marks per subject
     private Dictionary<int, List<AssessmentMarkInfo>> assessmentMarksCache = new();
     private Dictionary<int, List<Subject>> learnerSubjectsCache = new();
@@ -374,6 +381,8 @@ else
                 .Where(l => l.User!.Fullname.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
+
+        currentPage = 1;
     }
 
     private void ClearSearch()
@@ -381,6 +390,7 @@ else
         searchTerm = string.Empty;
         selectedGrade = 0;
         filteredLearners = allLearners;
+        currentPage = 1;
     }
 
     private async Task ViewProfile(Learner learner)

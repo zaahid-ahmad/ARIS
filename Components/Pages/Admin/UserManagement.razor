@@ -54,7 +54,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var user in FilteredUsers)
+            @foreach (var user in PagedUsers)
             {
                 <tr>
                     <td>@user.Fullname</td>
@@ -86,6 +86,7 @@ else
             }
         </tbody>
     </table>
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
 }
 
 <!-- DELETE/DEACTIVATE CONFIRMATION MODAL -->
@@ -158,6 +159,12 @@ else
             u.Fullname.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
             u.Email!.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
         ?? Enumerable.Empty<User>();
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling(FilteredUsers.Count() / (double)PageSize);
+    private IEnumerable<User> PagedUsers => FilteredUsers.Skip((currentPage - 1) * PageSize).Take(PageSize);
+    private void GoToPage(int page) => currentPage = page;
 
     protected override async Task OnInitializedAsync()
     {
@@ -320,12 +327,14 @@ else
 
     private void SearchUsers()
     {
+        currentPage = 1;
         StateHasChanged();
     }
 
     private void ClearSearch()
     {
         searchTerm = string.Empty;
+        currentPage = 1;
         StateHasChanged();
     }
 }

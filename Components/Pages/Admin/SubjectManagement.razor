@@ -75,7 +75,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var subject in filteredSubjects)
+            @foreach (var subject in PagedSubjects)
             {
                 <tr>
                     <td>@subject.Name</td>
@@ -91,6 +91,7 @@ else
             }
         </tbody>
     </table>
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
 }
 
 <!-- ===== MODALS ===== -->
@@ -575,6 +576,13 @@ else
     private string activeTab = "assessments";
     private int manageTerm = 1;
 
+    // Pagination
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling((filteredSubjects?.Count ?? 0) / (double)PageSize);
+    private List<Subject> PagedSubjects => (filteredSubjects ?? new()).Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
+
     // Selected Items
     private Subject? selectedSubject;
     private Subject? subjectToDelete;
@@ -662,6 +670,7 @@ else
             .ToListAsync();
 
         filteredSubjects = allSubjects;
+        currentPage = 1;
 
         teachers = await DbContext.Teachers
             .AsNoTracking()
@@ -675,6 +684,7 @@ else
         filteredSubjects = selectedGrade == 0
             ? allSubjects
             : allSubjects?.Where(s => s.Grade == selectedGrade).ToList();
+        currentPage = 1;
     }
 
     // ===== SUBJECT CRUD =====

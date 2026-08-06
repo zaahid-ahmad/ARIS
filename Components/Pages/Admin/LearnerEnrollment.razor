@@ -93,7 +93,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var learner in enrolledLearners)
+                                @foreach (var learner in PagedEnrolled)
                                 {
                                     <tr>
                                         <td>@learner.User?.Fullname</td>
@@ -107,6 +107,7 @@
                                 }
                             </tbody>
                         </table>
+                        <Pager CurrentPage="enrolledPage" TotalPages="totalEnrolledPages" OnPageChanged="GoToEnrolledPage" />
                     }
                 </div>
             </div>
@@ -132,7 +133,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var learner in availableLearners)
+                                @foreach (var learner in PagedAvailable)
                                 {
                                     <tr>
                                         <td>@learner.User?.Fullname</td>
@@ -146,6 +147,7 @@
                                 }
                             </tbody>
                         </table>
+                        <Pager CurrentPage="availablePage" TotalPages="totalAvailablePages" OnPageChanged="GoToAvailablePage" />
                     }
                 </div>
             </div>
@@ -164,6 +166,17 @@
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private int? currentSchoolId;
+
+    private const int PageSize = 15;
+    private int enrolledPage = 1;
+    private int totalEnrolledPages => (int)Math.Ceiling(enrolledLearners.Count / (double)PageSize);
+    private List<Learner> PagedEnrolled => enrolledLearners.Skip((enrolledPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToEnrolledPage(int page) => enrolledPage = page;
+
+    private int availablePage = 1;
+    private int totalAvailablePages => (int)Math.Ceiling(availableLearners.Count / (double)PageSize);
+    private List<Learner> PagedAvailable => availableLearners.Skip((availablePage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToAvailablePage(int page) => availablePage = page;
 
     protected override async Task OnInitializedAsync()
     {
@@ -243,6 +256,8 @@
                 .ToListAsync();
 
             hasLoaded = true;
+            enrolledPage = 1;
+            availablePage = 1;
         }
         catch (Exception ex)
         {

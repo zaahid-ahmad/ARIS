@@ -109,7 +109,7 @@
             </tr>
         </thead>
         <tbody>
-            @foreach (var session in pastSessions)
+            @foreach (var session in PagedSessions)
             {
                 <tr>
                     <td>@session.Date.ToString("dd MMM yyyy")</td>
@@ -125,6 +125,7 @@
             }
         </tbody>
     </table>
+    <Pager CurrentPage="sessionsPage" TotalPages="sessionsTotalPages" OnPageChanged="GoToSessionsPage" />
 }
 
 @code {
@@ -149,6 +150,12 @@
     private string successMessage = string.Empty;
     private Teacher? currentTeacher;
     private int? currentSchoolId;
+
+    private int sessionsPage = 1;
+    private const int PageSize = 15;
+    private int sessionsTotalPages => (int)Math.Ceiling(pastSessions.Count / (double)PageSize);
+    private List<AttendanceSession> PagedSessions => pastSessions.Skip((sessionsPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToSessionsPage(int page) => sessionsPage = page;
 
     protected override async Task OnInitializedAsync()
     {
@@ -395,8 +402,8 @@
             .Include(s => s.AttendanceRecords)
             .OrderByDescending(s => s.Date)
             .ThenByDescending(s => s.Time)
-            .Take(10)
             .ToListAsync();
+        sessionsPage = 1;
     }
 
     private void ClearForm()

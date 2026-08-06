@@ -57,7 +57,7 @@ else
                 </tr>
             </thead>
             <tbody>
-                @foreach (var learner in atRiskLearners)
+                @foreach (var learner in PagedAtRisk)
                 {
                     var riskData = learnerRiskCache[learner.LearnerId];
                     var badgeClass = riskData.Level == "Critical" ? "danger" :
@@ -81,6 +81,7 @@ else
                 }
             </tbody>
         </table>
+        <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
     }
     else if (selectedSubjectId > 0 && hasLoaded)
     {
@@ -99,6 +100,12 @@ else
     private Teacher? currentTeacher;
     private int? currentSchoolId;
     private string errorMessage = string.Empty;
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling(atRiskLearners.Count / (double)PageSize);
+    private List<Learner> PagedAtRisk => atRiskLearners.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
 
     private class RiskData
     {
@@ -189,6 +196,7 @@ else
                 .ToList();
 
             hasLoaded = true;
+            currentPage = 1;
         }
         catch (Exception ex)
         {

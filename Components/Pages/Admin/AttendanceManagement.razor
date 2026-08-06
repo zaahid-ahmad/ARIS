@@ -34,7 +34,7 @@
     </div>
     <div class="col-md-3">
         <label>Filter by Subject</label>
-        <select class="form-control" @bind="filterSubjectId">
+        <select class="form-control" @bind="filterSubjectId" @bind:after="ResetPage">
             <option value="0">All Subjects</option>
             @foreach (var subject in subjectsForGrade)
             {
@@ -44,27 +44,18 @@
     </div>
     <div class="col-md-2">
         <label>From</label>
-        <input type="date" class="form-control" @bind="filterFrom" />
+        <input type="date" class="form-control" @bind="filterFrom" @bind:after="ResetPage" />
     </div>
     <div class="col-md-2">
         <label>To</label>
-        <input type="date" class="form-control" @bind="filterTo" />
+        <input type="date" class="form-control" @bind="filterTo" @bind:after="ResetPage" />
     </div>
     <div class="col-md-1 d-flex align-items-end">
         <button class="btn btn-outline-secondary" @onclick="ClearDateFilter">Clear</button>
     </div>
 </div>
 
-@{
-    var filteredSessions = sessions
-        .Where(s => filterGrade == 0 || s.Subject?.Grade == filterGrade)
-        .Where(s => filterSubjectId == 0 || s.SubjectId == filterSubjectId)
-        .Where(s => filterFrom == null || s.Date.Date >= filterFrom.Value.Date)
-        .Where(s => filterTo == null || s.Date.Date <= filterTo.Value.Date)
-        .ToList();
-}
-
-@if (filteredSessions.Count == 0)
+@if (FilteredSessions.Count == 0)
 {
     <p class="text-muted">No attendance sessions found.</p>
 }
@@ -82,7 +73,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var session in filteredSessions)
+            @foreach (var session in PagedSessions)
             {
                 var isExpanded = expandedSessionIds.Contains(session.SessionId);
 
@@ -153,6 +144,7 @@ else
             }
         </tbody>
     </table>
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
 }
 
 @code {
@@ -169,6 +161,19 @@ else
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private int? schoolId;
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private List<AttendanceSession> FilteredSessions => sessions
+        .Where(s => filterGrade == 0 || s.Subject?.Grade == filterGrade)
+        .Where(s => filterSubjectId == 0 || s.SubjectId == filterSubjectId)
+        .Where(s => filterFrom == null || s.Date.Date >= filterFrom.Value.Date)
+        .Where(s => filterTo == null || s.Date.Date <= filterTo.Value.Date)
+        .ToList();
+    private int totalPages => (int)Math.Ceiling(FilteredSessions.Count / (double)PageSize);
+    private List<AttendanceSession> PagedSessions => FilteredSessions.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
+    private void ResetPage() => currentPage = 1;
 
     protected override async Task OnInitializedAsync()
     {
@@ -220,6 +225,7 @@ else
     {
         filterFrom = null;
         filterTo = null;
+        currentPage = 1;
     }
 
     private void OnGradeChanged(ChangeEventArgs e)
@@ -229,6 +235,7 @@ else
         subjectsForGrade = filterGrade == 0
             ? subjects
             : subjects.Where(s => s.Grade == filterGrade).ToList();
+        currentPage = 1;
     }
 
     private void ToggleExpand(int sessionId)
@@ -264,6 +271,7 @@ else
             confirmDeleteSessionId = null;
             expandedSessionIds.Remove(sessionId);
             await LoadSessions();
+            if (currentPage > totalPages && totalPages > 0) currentPage = totalPages;
         }
         catch (Exception ex)
         {

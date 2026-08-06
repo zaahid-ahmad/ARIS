@@ -43,7 +43,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var admin in admins)
+            @foreach (var admin in PagedAdmins)
             {
                 var schoolName = admin.School?.Name ?? "Not Assigned";
                 <tr>
@@ -70,6 +70,7 @@ else
             }
         </tbody>
     </table>
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
 }
 
 <!-- ADD ADMIN MODAL -->
@@ -181,6 +182,12 @@ else
     private List<School>? schools;
     private User? adminToResetPassword;
     private User? adminToDeactivate;
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling((admins?.Count ?? 0) / (double)PageSize);
+    private List<User> PagedAdmins => (admins ?? new()).Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
     
     private bool showAddAdminModal = false;
     private string newAdminFullname = string.Empty;
@@ -202,6 +209,7 @@ else
     {
         admins = (await UserManager.GetUsersInRoleAsync("Admin"))
             .ToList();
+        currentPage = 1;
 
         // Include school info
         foreach (var admin in admins)

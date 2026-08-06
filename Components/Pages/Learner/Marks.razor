@@ -28,7 +28,7 @@ else if (subjects.Count == 0)
 }
 else
 {
-    @foreach (var subject in subjects)
+    @foreach (var subject in PagedSubjects)
     {
         var subjectMarks = subjectMarksCache.ContainsKey(subject.SubjectId)
             ? subjectMarksCache[subject.SubjectId]
@@ -70,6 +70,7 @@ else
             </div>
         </div>
     }
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
 }
 
 @code {
@@ -77,6 +78,12 @@ else
     private List<Subject>? subjects;
     private Dictionary<int, List<LearnerMark>> subjectMarksCache = new();
     private string errorMessage = string.Empty;
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling((subjects?.Count ?? 0) / (double)PageSize);
+    private List<Subject> PagedSubjects => (subjects ?? new()).Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
 
     protected override async Task OnInitializedAsync()
     {

@@ -1,0 +1,54 @@
+@if (TotalPages > 1)
+{
+    <nav aria-label="Page navigation">
+        <ul class="pagination justify-content-center mt-3 mb-0">
+            <li class="page-item @(CurrentPage == 1 ? "disabled" : "")">
+                <button class="page-link" @onclick="Prev" disabled="@(CurrentPage == 1)">&laquo; Prev</button>
+            </li>
+            @foreach (var page in PageNumbers)
+            {
+                @if (page == 0)
+                {
+                    <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                }
+                else
+                {
+                    <li class="page-item @(page == CurrentPage ? "active" : "")">
+                        <button class="page-link" @onclick="() => Go(page)">@(page)</button>
+                    </li>
+                }
+            }
+            <li class="page-item @(CurrentPage == TotalPages ? "disabled" : "")">
+                <button class="page-link" @onclick="Next" disabled="@(CurrentPage == TotalPages)">Next &raquo;</button>
+            </li>
+        </ul>
+    </nav>
+    <p class="text-center text-muted small mt-1">Page @CurrentPage of @TotalPages</p>
+}
+
+@code {
+    [Parameter] public int CurrentPage { get; set; }
+    [Parameter] public int TotalPages { get; set; }
+    [Parameter] public EventCallback<int> OnPageChanged { get; set; }
+
+    private IEnumerable<int> PageNumbers
+    {
+        get
+        {
+            if (TotalPages <= 7)
+                return Enumerable.Range(1, TotalPages);
+
+            var pages = new List<int> { 1 };
+            if (CurrentPage > 3) pages.Add(0);
+            for (int i = Math.Max(2, CurrentPage - 1); i <= Math.Min(TotalPages - 1, CurrentPage + 1); i++)
+                pages.Add(i);
+            if (CurrentPage < TotalPages - 2) pages.Add(0);
+            pages.Add(TotalPages);
+            return pages;
+        }
+    }
+
+    private Task Prev() => OnPageChanged.InvokeAsync(CurrentPage - 1);
+    private Task Next() => OnPageChanged.InvokeAsync(CurrentPage + 1);
+    private Task Go(int page) => OnPageChanged.InvokeAsync(page);
+}

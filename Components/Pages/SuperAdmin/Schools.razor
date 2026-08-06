@@ -43,7 +43,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var school in schools)
+            @foreach (var school in PagedSchools)
             {
                 <tr>
                     <td>@school.Name</td>
@@ -70,6 +70,7 @@ else
             }
         </tbody>
     </table>
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
 }
 
 <!-- ADD/EDIT SCHOOL MODAL -->
@@ -161,6 +162,12 @@ else
     private string modalError = string.Empty;
     private string codeError = string.Empty;
 
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling((schools?.Count ?? 0) / (double)PageSize);
+    private List<School> PagedSchools => (schools ?? new()).Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadSchools();
@@ -172,6 +179,7 @@ else
             .AsNoTracking()
             .OrderBy(s => s.Name)
             .ToListAsync();
+        currentPage = 1;
     }
 
     private void ShowAddSchoolModal()
