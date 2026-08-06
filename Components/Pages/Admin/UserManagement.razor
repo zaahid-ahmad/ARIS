@@ -39,7 +39,7 @@ else
 {
     <div class="mb-3 mt-3 d-flex gap-2">
         <input class="form-control" placeholder="Search by name or email..."
-               @bind="searchTerm" />
+               @bind="searchTerm" autocomplete="off" />
         <button class="btn btn-primary" @onclick="SearchUsers">Search</button>
         <button class="btn btn-secondary" @onclick="ClearSearch">Clear</button>
     </div>
@@ -65,7 +65,7 @@ else
                         @if (user.IsActive)
                         {
                             <button class="btn btn-warning btn-sm ms-1"
-                                    @onclick="() => ShowResetPassword(user)"
+                                    @onclick="() => ShowResetPassword(user.Id, user.Fullname, user.Email ?? string.Empty)"
                                     disabled="@(user.Id == currentUserId)">
                                 Reset Password
                             </button>
@@ -112,25 +112,32 @@ else
 }
 
 <!-- RESET PASSWORD MODAL -->
-@if (userToReset != null)
+@if (userToResetId != null)
 {
     <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Reset Password for @userToReset.Fullname</h5>
+                    <h5 class="modal-title">Reset Password for @userToResetName</h5>
                     <button type="button" class="btn-close" @onclick="CancelReset"></button>
                 </div>
                 <div class="modal-body">
                     @if (!string.IsNullOrEmpty(resetMessage))
                     {
-                        <div class="alert alert-success">@resetMessage</div>
+                        <div class="alert @(resetMessage.StartsWith("Password reset") ? "alert-success" : "alert-danger")">@resetMessage</div>
                     }
-                    <label>New Password</label>
-                    <input type="password" class="form-control" @bind="newPassword" />
-                    <small class="text-muted">
-                        Username/Email: @userToReset.Email
-                    </small>
+                    <div class="mb-3">
+                        <label class="form-label">New Password <span class="text-danger">*</span></label>
+                        <input type="password" class="form-control @(passwordResetError != null ? "is-invalid" : "")"
+                               @bind="newPassword" @oninput="@(() => passwordResetError = null)"
+                               autocomplete="new-password" />
+                        @if (passwordResetError != null)
+                        {
+                            <div class="invalid-feedback">@passwordResetError</div>
+                        }
+                        <small class="text-muted">Minimum 8 characters, must include at least one digit.</small>
+                    </div>
+                    <small class="text-muted">Username/Email: @userToResetEmail</small>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="CancelReset">Cancel</button>
@@ -145,12 +152,15 @@ else
     private List<User>? users;
     private Dictionary<string, string> userRoles = new();
     private User? userToDeactivate;
-    private User? userToReset;
+    private string? userToResetId;
+    private string userToResetName = string.Empty;
+    private string userToResetEmail = string.Empty;
     private string newPassword = string.Empty;
     private string searchTerm = string.Empty;
     private string resetMessage = string.Empty;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
+    private string? passwordResetError;
     private int? currentSchoolId;
     private string? currentUserId;
 
@@ -284,45 +294,62 @@ else
         }
     }
 
-    private void ShowResetPassword(User user)
+    private void ShowResetPassword(string userId, string fullname, string email)
     {
-        userToReset = user;
+        userToResetId = userId;
+        userToResetName = fullname;
+        userToResetEmail = email;
         newPassword = string.Empty;
         resetMessage = string.Empty;
+        passwordResetError = null;
     }
 
     private async Task ConfirmResetPassword()
     {
-        if (userToReset != null && !string.IsNullOrWhiteSpace(newPassword))
+        if (userToResetId == null) return;
+
+        passwordResetError = null;
+        if (string.IsNullOrWhiteSpace(newPassword))
+        { passwordResetError = "Password is required."; return; }
+        if (newPassword.Length < 8)
+        { passwordResetError = "Password must be at least 8 characters."; return; }
+        if (!newPassword.Any(char.IsDigit))
+        { passwordResetError = "Password must contain at least one digit."; return; }
+
+        try
         {
-            try
+            var user = await UserManager.FindByIdAsync(userToResetId);
+            if (user == null)
+            { resetMessage = "User no longer exists."; return; }
+
+            var token = await UserManager.GeneratePasswordResetTokenAsync(user);
+            var result = await UserManager.ResetPasswordAsync(user, token, newPassword);
+
+            if (result.Succeeded)
             {
-                var token = await UserManager.GeneratePasswordResetTokenAsync(userToReset);
-                var result = await UserManager.ResetPasswordAsync(userToReset, token, newPassword);
-                
-                if (result.Succeeded)
-                {
-                    resetMessage = "Password reset successfully!";
-                    userToReset = null;
-                    newPassword = string.Empty;
-                }
-                else
-                {
-                    resetMessage = string.Join(", ", result.Errors.Select(e => e.Description));
-                }
+                resetMessage = "Password reset successfully!";
+                userToResetId = null;
+                newPassword = string.Empty;
             }
-            catch (Exception ex)
+            else
             {
-                resetMessage = $"Error: {ex.Message}";
+                resetMessage = string.Join(", ", result.Errors.Select(e => e.Description));
             }
+        }
+        catch (Exception ex)
+        {
+            resetMessage = $"Error: {ex.Message}";
         }
     }
 
     private void CancelReset()
     {
-        userToReset = null;
+        userToResetId = null;
+        userToResetName = string.Empty;
+        userToResetEmail = string.Empty;
         resetMessage = string.Empty;
         newPassword = string.Empty;
+        passwordResetError = null;
     }
 
     private void SearchUsers()

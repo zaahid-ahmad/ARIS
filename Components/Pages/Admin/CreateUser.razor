@@ -1,4 +1,4 @@
-﻿@page "/admin/users/create"
+@page "/admin/users/create"
 @using ARIS1.Data
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.AspNetCore.Authorization
@@ -14,47 +14,76 @@
 
 <h2>Create New User</h2>
 
-@if (!string.IsNullOrEmpty(errorMessage))
-{
-    <div class="alert alert-danger">@errorMessage</div>
-}
 @if (!string.IsNullOrEmpty(successMessage))
 {
     <div class="alert alert-success">@successMessage</div>
+}
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
 }
 
 <div class="row">
     <div class="col-md-5">
         <div class="mb-3">
-            <label>Full Name</label>
-            <input class="form-control" @bind="fullName" />
+            <label class="form-label">Full Name <span class="text-danger">*</span></label>
+            <input class="form-control @(fullNameError != null ? "is-invalid" : "")"
+                   @bind="fullName" @oninput="@(() => fullNameError = null)"
+                   maxlength="100" placeholder="e.g. Jane Doe" />
+            @if (fullNameError != null)
+            {
+                <div class="invalid-feedback">@fullNameError</div>
+            }
         </div>
         <div class="mb-3">
-            <label>Email</label>
-            <input class="form-control" @bind="email" />
+            <label class="form-label">Email <span class="text-danger">*</span></label>
+            <input class="form-control @(emailError != null ? "is-invalid" : "")"
+                   type="email" @bind="email" @oninput="@(() => emailError = null)"
+                   maxlength="256" placeholder="e.g. jane@school.com" />
+            @if (emailError != null)
+            {
+                <div class="invalid-feedback">@emailError</div>
+            }
         </div>
         <div class="mb-3">
-            <label>Password</label>
-            <input type="password" class="form-control" @bind="password" />
+            <label class="form-label">Password <span class="text-danger">*</span></label>
+            <input type="password" class="form-control @(passwordError != null ? "is-invalid" : "")"
+                   @bind="password" @oninput="@(() => passwordError = null)"
+                   autocomplete="new-password" />
+            @if (passwordError != null)
+            {
+                <div class="invalid-feedback">@passwordError</div>
+            }
+            <small class="text-muted">Minimum 8 characters, must include at least one digit.</small>
         </div>
         <div class="mb-3">
-            <label>Role</label>
-            <select class="form-control" @bind="role">
+            <label class="form-label">Role <span class="text-danger">*</span></label>
+            <select class="form-control @(roleError != null ? "is-invalid" : "")"
+                    @bind="role" @bind:after="@(() => roleError = null)">
                 <option value="">-- Select Role --</option>
                 <option value="Teacher">Teacher</option>
                 <option value="Learner">Learner</option>
             </select>
+            @if (roleError != null)
+            {
+                <div class="invalid-feedback">@roleError</div>
+            }
         </div>
 
         @if (role == "Learner")
         {
             <div class="mb-3">
-                <label>Grade</label>
-                <select class="form-control" @bind="grade">
+                <label class="form-label">Grade <span class="text-danger">*</span></label>
+                <select class="form-control @(gradeError != null ? "is-invalid" : "")"
+                        @bind="grade" @bind:after="@(() => gradeError = null)">
                     <option value="10">Grade 10</option>
                     <option value="11">Grade 11</option>
                     <option value="12">Grade 12</option>
                 </select>
+                @if (gradeError != null)
+                {
+                    <div class="invalid-feedback">@gradeError</div>
+                }
             </div>
         }
         <button class="btn btn-primary" @onclick="CreateUserAsync">Create User</button>
@@ -67,66 +96,67 @@
     private string email = string.Empty;
     private string password = string.Empty;
     private string role = string.Empty;
-    private string grade = "10";  // ← Add this
+    private string grade = "10";
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
+
+    private string? fullNameError;
+    private string? emailError;
+    private string? passwordError;
+    private string? roleError;
+    private string? gradeError;
+
+    private bool ValidateForm()
+    {
+        fullNameError = emailError = passwordError = roleError = gradeError = null;
+        var valid = true;
+
+        if (string.IsNullOrWhiteSpace(fullName))
+        { fullNameError = "Full name is required."; valid = false; }
+        else if (fullName.Trim().Length < 2)
+        { fullNameError = "Full name must be at least 2 characters."; valid = false; }
+
+        if (string.IsNullOrWhiteSpace(email))
+        { emailError = "Email is required."; valid = false; }
+        else if (!new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(email))
+        { emailError = "Enter a valid email address."; valid = false; }
+
+        if (string.IsNullOrWhiteSpace(password))
+        { passwordError = "Password is required."; valid = false; }
+        else if (password.Length < 8)
+        { passwordError = "Password must be at least 8 characters."; valid = false; }
+        else if (!password.Any(char.IsDigit))
+        { passwordError = "Password must contain at least one digit."; valid = false; }
+
+        if (string.IsNullOrWhiteSpace(role))
+        { roleError = "Please select a role."; valid = false; }
+
+        if (role == "Learner" && string.IsNullOrWhiteSpace(grade))
+        { gradeError = "Please select a grade."; valid = false; }
+
+        return valid;
+    }
 
     private async Task CreateUserAsync()
     {
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
-        // Validate all fields
-        if (string.IsNullOrWhiteSpace(fullName) ||
-            string.IsNullOrWhiteSpace(email) ||
-            string.IsNullOrWhiteSpace(password) ||
-            string.IsNullOrWhiteSpace(role))
-        {
-            errorMessage = "Please fill in all fields.";
-            return;
-        }
+        if (!ValidateForm()) return;
 
-        // Validate grade for learners
-        if (role == "Learner" && string.IsNullOrWhiteSpace(grade))
-        {
-            errorMessage = "Please select a grade for learners.";
-            return;
-        }
-
-        // Email validation
-        var emailValid = new System.ComponentModel.DataAnnotations.EmailAddressAttribute();
-        if (!emailValid.IsValid(email))
-        {
-            errorMessage = "Please enter a valid email address.";
-            return;
-        }
-
-        // Get current admin's school
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         var userName = authState.User.Identity?.Name;
-        
         if (string.IsNullOrEmpty(userName))
-        {
-            errorMessage = "You must be logged in.";
-            return;
-        }
+        { errorMessage = "You must be logged in."; return; }
 
         var currentAdmin = await UserManager.FindByNameAsync(userName);
         if (currentAdmin?.SchoolId == null)
-        {
-            errorMessage = "You are not assigned to a school.";
-            return;
-        }
+        { errorMessage = "You are not assigned to a school."; return; }
 
-        // Check if email already exists
         var existingUser = await UserManager.FindByEmailAsync(email);
         if (existingUser != null)
-        {
-            errorMessage = "This email is already in use.";
-            return;
-        }
+        { emailError = "This email is already in use."; return; }
 
-        // Create new user
         var user = new User
         {
             UserName = email,
@@ -134,7 +164,7 @@
             Fullname = fullName,
             IsActive = true,
             EmailConfirmed = true,
-            SchoolId = currentAdmin.SchoolId  // Assign to admin's school
+            SchoolId = currentAdmin.SchoolId
         };
 
         var result = await UserManager.CreateAsync(user, password);
@@ -143,10 +173,8 @@
         {
             try
             {
-                // Add user to role
                 await UserManager.AddToRoleAsync(user, role);
 
-                // Create Teacher or Learner record
                 if (role == "Teacher")
                 {
                     var teacher = new Teacher { UserId = user.Id };
@@ -158,7 +186,7 @@
                     var learner = new Learner
                     {
                         UserId = user.Id,
-                        Grade = int.Parse(grade),  // ← Use selected grade
+                        Grade = int.Parse(grade),
                         ClassName = "Unassigned",
                         EnrollmentYear = DateTime.Now.Year
                     };
@@ -171,9 +199,8 @@
                 email = string.Empty;
                 password = string.Empty;
                 role = string.Empty;
-                grade = "10";  // Reset grade
+                grade = "10";
 
-                // Redirect back to users list after a short delay
                 await Task.Delay(1500);
                 Navigation.NavigateTo("/admin/users");
             }

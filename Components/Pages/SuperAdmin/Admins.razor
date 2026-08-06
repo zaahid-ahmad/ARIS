@@ -84,27 +84,40 @@ else
                     <button type="button" class="btn-close" @onclick="() => showAddAdminModal = false"></button>
                 </div>
                 <div class="modal-body">
-                    @if (!string.IsNullOrEmpty(modalError))
-                    {
-                        <div class="alert alert-danger">@modalError</div>
-                    }
                     <div class="mb-3">
-                        <label>Full Name</label>
-                        <input class="form-control" @bind="newAdminFullname" placeholder="e.g. John Doe" />
+                        <label class="form-label">Full Name <span class="text-danger">*</span></label>
+                        <input class="form-control @(fullnameError != null ? "is-invalid" : "")"
+                               @bind="newAdminFullname" @oninput="@(() => fullnameError = null)"
+                               maxlength="100" placeholder="e.g. John Doe" />
+                        @if (fullnameError != null)
+                        {
+                            <div class="invalid-feedback">@fullnameError</div>
+                        }
                     </div>
                     <div class="mb-3">
-                        <label>Email</label>
-                        <input class="form-control" @bind="newAdminEmail" type="email" placeholder="e.g. john@school.com" />
+                        <label class="form-label">Email <span class="text-danger">*</span></label>
+                        <input class="form-control @(adminEmailError != null ? "is-invalid" : "")"
+                               type="email" @bind="newAdminEmail" @oninput="@(() => adminEmailError = null)"
+                               maxlength="256" placeholder="e.g. john@school.com" />
+                        @if (adminEmailError != null)
+                        {
+                            <div class="invalid-feedback">@adminEmailError</div>
+                        }
                     </div>
                     <div class="mb-3">
-                        <label>Assign to School</label>
-                        <select class="form-control" @bind="newAdminSchoolId">
+                        <label class="form-label">Assign to School <span class="text-danger">*</span></label>
+                        <select class="form-control @(schoolError != null ? "is-invalid" : "")"
+                                @bind="newAdminSchoolId" @bind:after="@(() => schoolError = null)">
                             <option value="0">-- Select School --</option>
                             @foreach (var school in schools ?? new List<School>())
                             {
                                 <option value="@school.SchoolId">@school.Name (@school.Code)</option>
                             }
                         </select>
+                        @if (schoolError != null)
+                        {
+                            <div class="invalid-feedback">@schoolError</div>
+                        }
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -197,8 +210,11 @@ else
 
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
-    private string modalError = string.Empty;
     private string resetError = string.Empty;
+
+    private string? fullnameError;
+    private string? adminEmailError;
+    private string? schoolError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -229,34 +245,48 @@ else
         newAdminFullname = string.Empty;
         newAdminEmail = string.Empty;
         newAdminSchoolId = 0;
-        modalError = string.Empty;
+        fullnameError = adminEmailError = schoolError = null;
         showAddAdminModal = true;
+    }
+
+    private bool ValidateAdminForm()
+    {
+        fullnameError = adminEmailError = schoolError = null;
+        var valid = true;
+
+        if (string.IsNullOrWhiteSpace(newAdminFullname))
+        { fullnameError = "Full name is required."; valid = false; }
+        else if (newAdminFullname.Trim().Length < 2)
+        { fullnameError = "Full name must be at least 2 characters."; valid = false; }
+
+        if (string.IsNullOrWhiteSpace(newAdminEmail))
+        { adminEmailError = "Email is required."; valid = false; }
+        else if (!new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(newAdminEmail))
+        { adminEmailError = "Enter a valid email address."; valid = false; }
+
+        if (newAdminSchoolId == 0)
+        { schoolError = "Please select a school."; valid = false; }
+
+        return valid;
     }
 
     private async Task CreateAdmin()
     {
-        modalError = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(newAdminFullname) || string.IsNullOrWhiteSpace(newAdminEmail) || newAdminSchoolId == 0)
-        {
-            modalError = "All fields are required.";
-            return;
-        }
+        if (!ValidateAdminForm()) return;
 
         try
         {
             var existingUser = await UserManager.FindByEmailAsync(newAdminEmail);
             if (existingUser != null)
             {
-                modalError = "Email already in use.";
+                adminEmailError = "This email is already in use.";
                 return;
             }
 
-            // Verify school exists and is active
             var school = await DbContext.Schools.FindAsync(newAdminSchoolId);
             if (school == null || !school.IsActive)
             {
-                modalError = "Selected school is invalid or inactive.";
+                schoolError = "Selected school is invalid or inactive.";
                 return;
             }
 
@@ -283,7 +313,7 @@ else
             }
             else
             {
-                modalError = string.Join(", ", result.Errors.Select(e => e.Description));
+                errorMessage = string.Join(", ", result.Errors.Select(e => e.Description));
             }
         }
         catch (Exception ex)

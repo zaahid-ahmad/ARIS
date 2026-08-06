@@ -107,11 +107,17 @@ else
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label>Subject Name</label>
-                        <input class="form-control" @bind="subjectName" />
+                        <label class="form-label">Subject Name <span class="text-danger">*</span></label>
+                        <input class="form-control @(subjectNameError != null ? "is-invalid" : "")"
+                               @bind="subjectName" @oninput="@(() => subjectNameError = null)"
+                               maxlength="100" placeholder="e.g. Mathematics" />
+                        @if (subjectNameError != null)
+                        {
+                            <div class="invalid-feedback">@subjectNameError</div>
+                        }
                     </div>
                     <div class="mb-3">
-                        <label>Grade</label>
+                        <label class="form-label">Grade <span class="text-danger">*</span></label>
                         <select class="form-control" @bind="grade">
                             <option value="10">Grade 10</option>
                             <option value="11">Grade 11</option>
@@ -119,8 +125,9 @@ else
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label>Assign Teacher</label>
-                        <select class="form-control" @bind="teacherId">
+                        <label class="form-label">Assign Teacher <span class="text-danger">*</span></label>
+                        <select class="form-control @(teacherIdError != null ? "is-invalid" : "")"
+                                @bind="teacherId" @bind:after="@(() => teacherIdError = null)">
                             <option value="0">-- Select Teacher --</option>
                             @if (teachers != null)
                             {
@@ -130,10 +137,20 @@ else
                                 }
                             }
                         </select>
+                        @if (teacherIdError != null)
+                        {
+                            <div class="invalid-feedback">@teacherIdError</div>
+                        }
                     </div>
                     <div class="mb-3">
-                        <label>Academic Year</label>
-                        <input type="number" class="form-control" @bind="academicYear" />
+                        <label class="form-label">Academic Year <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control @(yearError != null ? "is-invalid" : "")"
+                               @bind="academicYear" @oninput="@(() => yearError = null)"
+                               min="2020" max="@(DateTime.Now.Year + 1)" />
+                        @if (yearError != null)
+                        {
+                            <div class="invalid-feedback">@yearError</div>
+                        }
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -156,16 +173,18 @@ else
                     <button type="button" class="btn-close" @onclick="() => subjectToEdit = null"></button>
                 </div>
                 <div class="modal-body">
-                    @if (!string.IsNullOrEmpty(editError))
-                    {
-                        <div class="alert alert-danger">@editError</div>
-                    }
                     <div class="mb-3">
-                        <label>Subject Name</label>
-                        <input class="form-control" @bind="editSubjectName" />
+                        <label class="form-label">Subject Name <span class="text-danger">*</span></label>
+                        <input class="form-control @(editNameError != null ? "is-invalid" : "")"
+                               @bind="editSubjectName" @oninput="@(() => editNameError = null)"
+                               maxlength="100" />
+                        @if (editNameError != null)
+                        {
+                            <div class="invalid-feedback">@editNameError</div>
+                        }
                     </div>
                     <div class="mb-3">
-                        <label>Grade</label>
+                        <label class="form-label">Grade <span class="text-danger">*</span></label>
                         <select class="form-control" @bind="editGrade">
                             <option value="10">Grade 10</option>
                             <option value="11">Grade 11</option>
@@ -173,8 +192,9 @@ else
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label>Assign Teacher</label>
-                        <select class="form-control" @bind="editTeacherId">
+                        <label class="form-label">Assign Teacher <span class="text-danger">*</span></label>
+                        <select class="form-control @(editTeacherError != null ? "is-invalid" : "")"
+                                @bind="editTeacherId" @bind:after="@(() => editTeacherError = null)">
                             <option value="0">-- Select Teacher --</option>
                             @if (teachers != null)
                             {
@@ -184,10 +204,20 @@ else
                                 }
                             }
                         </select>
+                        @if (editTeacherError != null)
+                        {
+                            <div class="invalid-feedback">@editTeacherError</div>
+                        }
                     </div>
                     <div class="mb-3">
-                        <label>Academic Year</label>
-                        <input type="number" class="form-control" @bind="editAcademicYear" />
+                        <label class="form-label">Academic Year <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control @(editYearError != null ? "is-invalid" : "")"
+                               @bind="editAcademicYear" @oninput="@(() => editYearError = null)"
+                               min="2020" max="@(DateTime.Now.Year + 1)" />
+                        @if (editYearError != null)
+                        {
+                            <div class="invalid-feedback">@editYearError</div>
+                        }
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -290,9 +320,17 @@ else
                         }
 
                         <!-- Add New Assessment Type -->
-                        <div class="d-flex align-items-center gap-2 mb-4">
-                            <input class="form-control" style="max-width:220px;"
-                                   @bind="newTypeName" placeholder="New type name (e.g. SBA)" />
+                        <div class="d-flex align-items-start gap-2 mb-4">
+                            <div>
+                                <input class="form-control @(newTypeNameInvalid ? "is-invalid" : "")"
+                                       style="max-width:220px;"
+                                       @bind="newTypeName" @oninput="@(() => newTypeNameInvalid = false)"
+                                       maxlength="50" placeholder="New type name (e.g. SBA)" />
+                                @if (newTypeNameInvalid)
+                                {
+                                    <div class="invalid-feedback d-block">Type name is required.</div>
+                                }
+                            </div>
                             <button class="btn btn-success" @onclick="CreateAssessmentType">+ Add Type</button>
                         </div>
 
@@ -388,13 +426,32 @@ else
                                                                     <p class="text-muted small mb-2">No questions yet.</p>
                                                                 }
 
-                                                                <div class="d-flex gap-2 align-items-center">
-                                                                    <input type="number" class="form-control form-control-sm"
-                                                                           style="width:65px;" @bind="newQuestionNumber" placeholder="Q#" />
-                                                                    <input class="form-control form-control-sm"
-                                                                           style="width:200px;" @bind="newQuestionTopic" placeholder="Topic" />
-                                                                    <input type="number" class="form-control form-control-sm"
-                                                                           style="width:85px;" @bind="newQuestionMaxMark" placeholder="Marks" />
+                                                                <div class="d-flex gap-2 align-items-start flex-wrap">
+                                                                    <div>
+                                                                        <input type="number" class="form-control form-control-sm"
+                                                                               style="width:65px;" @bind="newQuestionNumber"
+                                                                               min="1" placeholder="Q#" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <input class="form-control form-control-sm @(newTopicInvalid ? "is-invalid" : "")"
+                                                                               style="width:200px;" @bind="newQuestionTopic"
+                                                                               @oninput="@(() => newTopicInvalid = false)"
+                                                                               maxlength="100" placeholder="Topic" />
+                                                                        @if (newTopicInvalid)
+                                                                        {
+                                                                            <div class="invalid-feedback d-block" style="width:200px;">Topic is required.</div>
+                                                                        }
+                                                                    </div>
+                                                                    <div>
+                                                                        <input type="number" class="form-control form-control-sm @(newQMarkInvalid ? "is-invalid" : "")"
+                                                                               style="width:85px;" @bind="newQuestionMaxMark"
+                                                                               @oninput="@(() => newQMarkInvalid = false)"
+                                                                               min="0.01" step="0.01" placeholder="Marks" />
+                                                                        @if (newQMarkInvalid)
+                                                                        {
+                                                                            <div class="invalid-feedback d-block">Must be &gt; 0.</div>
+                                                                        }
+                                                                    </div>
                                                                     <button class="btn btn-sm btn-success" @onclick="CreateQuestion">+ Add</button>
                                                                 </div>
                                                             </td>
@@ -407,13 +464,36 @@ else
 
                                     <!-- Add Assessment -->
                                     <div class="p-3 border-top">
-                                        <div class="d-flex gap-2 align-items-center flex-wrap">
-                                            <input class="form-control form-control-sm" style="width:180px;"
-                                                   @bind="newAssessmentTitle" placeholder="Title" />
-                                            <input type="number" class="form-control form-control-sm" style="width:80px;"
-                                                   @bind="newAssessmentMaxMark" placeholder="Max" />
-                                            <input type="date" class="form-control form-control-sm" style="width:150px;"
-                                                   @bind="newAssessmentDate" />
+                                        <div class="d-flex gap-2 align-items-start flex-wrap">
+                                            <div>
+                                                <input class="form-control form-control-sm @(newTitleInvalid ? "is-invalid" : "")"
+                                                       style="width:180px;" @bind="newAssessmentTitle"
+                                                       @oninput="@(() => newTitleInvalid = false)"
+                                                       maxlength="100" placeholder="Title" />
+                                                @if (newTitleInvalid)
+                                                {
+                                                    <div class="invalid-feedback d-block">Title is required.</div>
+                                                }
+                                            </div>
+                                            <div>
+                                                <input type="number" class="form-control form-control-sm @(newAMaxMarkInvalid ? "is-invalid" : "")"
+                                                       style="width:80px;" @bind="newAssessmentMaxMark"
+                                                       @oninput="@(() => newAMaxMarkInvalid = false)"
+                                                       min="0.01" step="0.01" placeholder="Max" />
+                                                @if (newAMaxMarkInvalid)
+                                                {
+                                                    <div class="invalid-feedback d-block">Must be &gt; 0.</div>
+                                                }
+                                            </div>
+                                            <div>
+                                                <input type="date" class="form-control form-control-sm @(newDateInvalid ? "is-invalid" : "")"
+                                                       style="width:150px;" @bind="newAssessmentDate"
+                                                       @oninput="@(() => newDateInvalid = false)" />
+                                                @if (newDateInvalid)
+                                                {
+                                                    <div class="invalid-feedback d-block">Date is required.</div>
+                                                }
+                                            </div>
                                             <button class="btn btn-sm btn-success"
                                                     @onclick="() => CreateAssessment(type.AssessmentTypeId)">
                                                 + Add Assessment
@@ -629,9 +709,26 @@ else
     private string assessmentSuccess = string.Empty;
     private string questionError = string.Empty;
     private string questionSuccess = string.Empty;
-    private string editError = string.Empty;
     private string weightError = string.Empty;
     private string weightSuccess = string.Empty;
+
+    // Per-field validation — create subject
+    private string? subjectNameError;
+    private string? teacherIdError;
+    private string? yearError;
+
+    // Per-field validation — edit subject
+    private string? editNameError;
+    private string? editTeacherError;
+    private string? editYearError;
+
+    // Per-field validation — inline forms
+    private bool newTypeNameInvalid;
+    private bool newTitleInvalid;
+    private bool newAMaxMarkInvalid;
+    private bool newDateInvalid;
+    private bool newTopicInvalid;
+    private bool newQMarkInvalid;
 
     // School context
     private int? currentSchoolId;
@@ -688,16 +785,31 @@ else
     }
 
     // ===== SUBJECT CRUD =====
+    private bool ValidateCreateSubject()
+    {
+        subjectNameError = teacherIdError = yearError = null;
+        var valid = true;
+
+        if (string.IsNullOrWhiteSpace(subjectName))
+        { subjectNameError = "Subject name is required."; valid = false; }
+        else if (subjectName.Trim().Length < 2)
+        { subjectNameError = "Name must be at least 2 characters."; valid = false; }
+
+        if (teacherId == 0)
+        { teacherIdError = "Please select a teacher."; valid = false; }
+
+        if (academicYear < 2020 || academicYear > DateTime.Now.Year + 1)
+        { yearError = $"Year must be between 2020 and {DateTime.Now.Year + 1}."; valid = false; }
+
+        return valid;
+    }
+
     private async Task CreateSubject()
     {
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(subjectName) || teacherId == 0)
-        {
-            errorMessage = "Please fill in all fields.";
-            return;
-        }
+        if (!ValidateCreateSubject()) return;
 
         var subject = new Subject
         {
@@ -725,18 +837,31 @@ else
         editGrade = subject.Grade;
         editTeacherId = subject.TeacherId;
         editAcademicYear = subject.AcademicYear;
-        editError = string.Empty;
+        editNameError = editTeacherError = editYearError = null;
+    }
+
+    private bool ValidateEditSubject()
+    {
+        editNameError = editTeacherError = editYearError = null;
+        var valid = true;
+
+        if (string.IsNullOrWhiteSpace(editSubjectName))
+        { editNameError = "Subject name is required."; valid = false; }
+        else if (editSubjectName.Trim().Length < 2)
+        { editNameError = "Name must be at least 2 characters."; valid = false; }
+
+        if (editTeacherId == 0)
+        { editTeacherError = "Please select a teacher."; valid = false; }
+
+        if (editAcademicYear < 2020 || editAcademicYear > DateTime.Now.Year + 1)
+        { editYearError = $"Year must be between 2020 and {DateTime.Now.Year + 1}."; valid = false; }
+
+        return valid;
     }
 
     private async Task UpdateSubject()
     {
-        editError = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(editSubjectName) || editTeacherId == 0)
-        {
-            editError = "Please fill in all fields.";
-            return;
-        }
+        if (!ValidateEditSubject()) return;
 
         if (subjectToEdit != null)
         {
@@ -864,10 +989,12 @@ else
     {
         assessmentTypeError = string.Empty;
         assessmentTypeSuccess = string.Empty;
+        newTypeNameInvalid = false;
 
         if (string.IsNullOrWhiteSpace(newTypeName))
         {
-            assessmentTypeError = "Please enter a name.";
+            newTypeNameInvalid = true;
+            assessmentTypeError = "Please enter a type name.";
             return;
         }
 
@@ -970,10 +1097,21 @@ else
     {
         assessmentError = string.Empty;
         assessmentSuccess = string.Empty;
+        newTitleInvalid = newAMaxMarkInvalid = newDateInvalid = false;
 
+        var assessmentValid = true;
         if (string.IsNullOrWhiteSpace(newAssessmentTitle))
+        { newTitleInvalid = true; assessmentValid = false; }
+
+        if (newAssessmentMaxMark <= 0)
+        { newAMaxMarkInvalid = true; assessmentValid = false; }
+
+        if (newAssessmentDate == default)
+        { newDateInvalid = true; assessmentValid = false; }
+
+        if (!assessmentValid)
         {
-            assessmentError = "Please enter a title.";
+            assessmentError = "Please fix the highlighted fields.";
             return;
         }
 
@@ -1068,6 +1206,9 @@ else
             newQuestionNumber = 1;
             newQuestionTopic = string.Empty;
             newQuestionMaxMark = 0;
+            newTopicInvalid = newQMarkInvalid = false;
+            questionError = string.Empty;
+            questionSuccess = string.Empty;
             await LoadAssessmentQuestions();
         }
     }
@@ -1091,12 +1232,22 @@ else
     {
         questionError = string.Empty;
         questionSuccess = string.Empty;
+        newTopicInvalid = newQMarkInvalid = false;
 
-        if (selectedAssessment == null || string.IsNullOrWhiteSpace(newQuestionTopic) || newQuestionMaxMark <= 0)
+        var questionValid = true;
+        if (string.IsNullOrWhiteSpace(newQuestionTopic))
+        { newTopicInvalid = true; questionValid = false; }
+
+        if (newQuestionMaxMark <= 0)
+        { newQMarkInvalid = true; questionValid = false; }
+
+        if (!questionValid)
         {
-            questionError = "Please fill in all fields.";
+            questionError = "Please fix the highlighted fields.";
             return;
         }
+
+        if (selectedAssessment == null) return;
 
         var totalQuestionMarks = assessmentQuestions.Sum(q => q.MaxMark) + newQuestionMaxMark;
         if (totalQuestionMarks > selectedAssessment.MaxMark)

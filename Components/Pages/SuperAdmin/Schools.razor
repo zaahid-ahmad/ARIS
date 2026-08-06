@@ -84,33 +84,50 @@ else
                     <button type="button" class="btn-close" @onclick="() => showSchoolModal = false"></button>
                 </div>
                 <div class="modal-body">
-                    @if (!string.IsNullOrEmpty(modalError))
-                    {
-                        <div class="alert alert-danger">@modalError</div>
-                    }
                     <div class="mb-3">
-                        <label>School Name</label>
-                        <input class="form-control" @bind="newSchool.Name" placeholder="e.g. Central High School" />
-                    </div>
-                    <div class="mb-3">
-                        <label>School Code</label>
-                        <input class="form-control" @bind="newSchool.Code" @bind:after="ValidateCodeUniqueness" placeholder="e.g. CHS001" />
-                        @if (!string.IsNullOrEmpty(codeError))
+                        <label class="form-label">School Name <span class="text-danger">*</span></label>
+                        <input class="form-control @(nameError != null ? "is-invalid" : "")"
+                               @bind="newSchool.Name" @oninput="@(() => nameError = null)"
+                               maxlength="200" placeholder="e.g. Central High School" />
+                        @if (nameError != null)
                         {
-                            <small class="text-danger">@codeError</small>
+                            <div class="invalid-feedback">@nameError</div>
                         }
                     </div>
                     <div class="mb-3">
-                        <label>Email</label>
-                        <input class="form-control" @bind="newSchool.Email" type="email" />
+                        <label class="form-label">School Code <span class="text-danger">*</span></label>
+                        <input class="form-control @(codeError != null ? "is-invalid" : "")"
+                               @bind="newSchool.Code" @bind:after="ValidateCodeUniqueness"
+                               maxlength="20" placeholder="e.g. CHS001" />
+                        @if (codeError != null)
+                        {
+                            <div class="invalid-feedback">@codeError</div>
+                        }
+                        <small class="text-muted">3–20 characters, letters, digits, and hyphens only.</small>
                     </div>
                     <div class="mb-3">
-                        <label>Phone</label>
-                        <input class="form-control" @bind="newSchool.Phone" />
+                        <label class="form-label">Email</label>
+                        <input class="form-control @(emailError != null ? "is-invalid" : "")"
+                               type="email" @bind="newSchool.Email" @oninput="@(() => emailError = null)"
+                               maxlength="256" placeholder="e.g. info@school.com" />
+                        @if (emailError != null)
+                        {
+                            <div class="invalid-feedback">@emailError</div>
+                        }
                     </div>
                     <div class="mb-3">
-                        <label>Address</label>
-                        <textarea class="form-control" @bind="newSchool.Address"></textarea>
+                        <label class="form-label">Phone</label>
+                        <input class="form-control @(phoneError != null ? "is-invalid" : "")"
+                               @bind="newSchool.Phone" @oninput="@(() => phoneError = null)"
+                               maxlength="20" placeholder="e.g. 011 000 0000" />
+                        @if (phoneError != null)
+                        {
+                            <div class="invalid-feedback">@phoneError</div>
+                        }
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Address</label>
+                        <textarea class="form-control" @bind="newSchool.Address" maxlength="500"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -159,8 +176,10 @@ else
     private bool isEditMode = false;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
-    private string modalError = string.Empty;
-    private string codeError = string.Empty;
+    private string? nameError;
+    private string? codeError;
+    private string? emailError;
+    private string? phoneError;
 
     private int currentPage = 1;
     private const int PageSize = 15;
@@ -187,8 +206,7 @@ else
         newSchool = new School();
         isEditMode = false;
         showSchoolModal = true;
-        modalError = string.Empty;
-        codeError = string.Empty;
+        nameError = codeError = emailError = phoneError = null;
     }
 
     private void EditSchool(School school)
@@ -205,43 +223,61 @@ else
         };
         isEditMode = true;
         showSchoolModal = true;
-        modalError = string.Empty;
-        codeError = string.Empty;
+        nameError = codeError = emailError = phoneError = null;
     }
 
     private async Task ValidateCodeUniqueness()
     {
-        codeError = string.Empty;
+        codeError = null;
         if (string.IsNullOrWhiteSpace(newSchool.Code)) return;
+
+        if (newSchool.Code.Trim().Length < 3)
+        { codeError = "Code must be at least 3 characters."; return; }
+
+        if (!System.Text.RegularExpressions.Regex.IsMatch(newSchool.Code, @"^[A-Za-z0-9\-]+$"))
+        { codeError = "Code may only contain letters, digits, and hyphens."; return; }
 
         var exists = await DbContext.Schools
             .AsNoTracking()
-            .AnyAsync(s => s.Code.ToUpper() == newSchool.Code.ToUpper() && 
+            .AnyAsync(s => s.Code.ToUpper() == newSchool.Code.ToUpper() &&
                           s.SchoolId != newSchool.SchoolId);
 
         if (exists)
-        {
             codeError = "This school code is already in use.";
-        }
+    }
+
+    private bool ValidateSchoolForm()
+    {
+        nameError = emailError = phoneError = null;
+        var valid = true;
+
+        if (string.IsNullOrWhiteSpace(newSchool.Name))
+        { nameError = "School name is required."; valid = false; }
+        else if (newSchool.Name.Trim().Length < 2)
+        { nameError = "Name must be at least 2 characters."; valid = false; }
+
+        if (!string.IsNullOrWhiteSpace(newSchool.Email) &&
+            !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(newSchool.Email))
+        { emailError = "Enter a valid email address."; valid = false; }
+
+        if (!string.IsNullOrWhiteSpace(newSchool.Phone) && newSchool.Phone.Trim().Length > 20)
+        { phoneError = "Phone number must be 20 characters or fewer."; valid = false; }
+
+        return valid;
     }
 
     private async Task SaveSchool()
     {
-        modalError = string.Empty;
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(newSchool.Name) || string.IsNullOrWhiteSpace(newSchool.Code))
-        {
-            modalError = "School name and code are required.";
-            return;
-        }
+        if (!ValidateSchoolForm()) return;
+
+        if (string.IsNullOrWhiteSpace(newSchool.Code))
+        { codeError = "School code is required."; return; }
 
         await ValidateCodeUniqueness();
-        if (!string.IsNullOrEmpty(codeError))
-        {
-            return;
-        }
+        if (codeError != null) return;
 
         try
         {
