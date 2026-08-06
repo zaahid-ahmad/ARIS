@@ -49,6 +49,7 @@ else
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Class</th>
                 <th>Active</th>
                 <th>Actions</th>
             </tr>
@@ -56,12 +57,21 @@ else
         <tbody>
             @foreach (var user in PagedUsers)
             {
+                var learner = learnerByUserId.GetValueOrDefault(user.Id);
                 <tr>
                     <td>@user.Fullname</td>
                     <td>@user.Email</td>
                     <td>@(userRoles.TryGetValue(user.Id, out var role) ? role : "-")</td>
+                    <td>@(learner != null ? learner.ClassName : "-")</td>
                     <td>@(user.IsActive ? "Yes" : "No")</td>
                     <td>
+                        @if (learner != null)
+                        {
+                            <button class="btn btn-info btn-sm ms-1"
+                                    @onclick="() => ShowEditClass(learner.LearnerId, user.Fullname, learner.ClassName)">
+                                Edit Class
+                            </button>
+                        }
                         @if (user.IsActive)
                         {
                             <button class="btn btn-warning btn-sm ms-1"
@@ -148,9 +158,41 @@ else
     </div>
 }
 
+<!-- EDIT CLASS MODAL -->
+@if (learnerToEditId != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Class for @learnerToEditName</h5>
+                    <button type="button" class="btn-close" @onclick="CancelEditClass"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Class <span class="text-danger">*</span></label>
+                        <input class="form-control @(classNameEditError != null ? "is-invalid" : "")"
+                               @bind="editClassName" @oninput="@(() => classNameEditError = null)"
+                               maxlength="20" placeholder="e.g. 10A" />
+                        @if (classNameEditError != null)
+                        {
+                            <div class="invalid-feedback">@classNameEditError</div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelEditClass">Cancel</button>
+                    <button class="btn btn-primary" @onclick="ConfirmEditClass">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<User>? users;
     private Dictionary<string, string> userRoles = new();
+    private Dictionary<string, Learner> learnerByUserId = new();
     private User? userToDeactivate;
     private string? userToResetId;
     private string userToResetName = string.Empty;
@@ -163,6 +205,10 @@ else
     private string? passwordResetError;
     private int? currentSchoolId;
     private string? currentUserId;
+    private int? learnerToEditId;
+    private string learnerToEditName = string.Empty;
+    private string editClassName = string.Empty;
+    private string? classNameEditError;
 
     private IEnumerable<User> FilteredUsers => users?
         .Where(u => string.IsNullOrWhiteSpace(searchTerm) ||
@@ -230,6 +276,10 @@ else
                 ur => ur.UserId,
                 ur => allRoles.FirstOrDefault(r => r.Id == ur.RoleId)?.Name ?? "-"
             );
+
+            learnerByUserId = await DbContext.Learners
+                .Where(l => userIds.Contains(l.UserId))
+                .ToDictionaryAsync(l => l.UserId);
         }
         catch (Exception ex)
         {
@@ -350,6 +400,48 @@ else
         resetMessage = string.Empty;
         newPassword = string.Empty;
         passwordResetError = null;
+    }
+
+    private void ShowEditClass(int learnerId, string fullname, string currentClassName)
+    {
+        learnerToEditId = learnerId;
+        learnerToEditName = fullname;
+        editClassName = currentClassName;
+        classNameEditError = null;
+    }
+
+    private async Task ConfirmEditClass()
+    {
+        if (learnerToEditId == null) return;
+
+        if (string.IsNullOrWhiteSpace(editClassName))
+        { classNameEditError = "Class is required."; return; }
+
+        try
+        {
+            var learner = await DbContext.Learners.FindAsync(learnerToEditId);
+            if (learner == null)
+            { classNameEditError = "Learner no longer exists."; return; }
+
+            learner.ClassName = editClassName.Trim();
+            await DbContext.SaveChangesAsync();
+
+            successMessage = $"Class updated to {learner.ClassName}.";
+            CancelEditClass();
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            classNameEditError = $"Error: {ex.Message}";
+        }
+    }
+
+    private void CancelEditClass()
+    {
+        learnerToEditId = null;
+        learnerToEditName = string.Empty;
+        editClassName = string.Empty;
+        classNameEditError = null;
     }
 
     private void SearchUsers()

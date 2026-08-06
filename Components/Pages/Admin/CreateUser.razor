@@ -85,6 +85,16 @@
                     <div class="invalid-feedback">@gradeError</div>
                 }
             </div>
+            <div class="mb-3">
+                <label class="form-label">Class <span class="text-danger">*</span></label>
+                <input class="form-control @(classNameError != null ? "is-invalid" : "")"
+                       @bind="className" @oninput="@(() => classNameError = null)"
+                       maxlength="20" placeholder="e.g. 10A" />
+                @if (classNameError != null)
+                {
+                    <div class="invalid-feedback">@classNameError</div>
+                }
+            </div>
         }
         <button class="btn btn-primary" @onclick="CreateUserAsync">Create User</button>
         <button class="btn btn-secondary ms-2" @onclick='() => Navigation.NavigateTo("/admin/users")'>Cancel</button>
@@ -97,6 +107,7 @@
     private string password = string.Empty;
     private string role = string.Empty;
     private string grade = "10";
+    private string className = string.Empty;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
 
@@ -105,10 +116,11 @@
     private string? passwordError;
     private string? roleError;
     private string? gradeError;
+    private string? classNameError;
 
     private bool ValidateForm()
     {
-        fullNameError = emailError = passwordError = roleError = gradeError = null;
+        fullNameError = emailError = passwordError = roleError = gradeError = classNameError = null;
         var valid = true;
 
         if (string.IsNullOrWhiteSpace(fullName))
@@ -133,6 +145,9 @@
 
         if (role == "Learner" && string.IsNullOrWhiteSpace(grade))
         { gradeError = "Please select a grade."; valid = false; }
+
+        if (role == "Learner" && string.IsNullOrWhiteSpace(className))
+        { classNameError = "Please enter a class."; valid = false; }
 
         return valid;
     }
@@ -187,7 +202,7 @@
                     {
                         UserId = user.Id,
                         Grade = int.Parse(grade),
-                        ClassName = "Unassigned",
+                        ClassName = className.Trim(),
                         EnrollmentYear = DateTime.Now.Year
                     };
                     DbContext.Learners.Add(learner);
@@ -200,6 +215,7 @@
                 password = string.Empty;
                 role = string.Empty;
                 grade = "10";
+                className = string.Empty;
 
                 await Task.Delay(1500);
                 Navigation.NavigateTo("/admin/users");
