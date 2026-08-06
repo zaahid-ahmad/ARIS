@@ -342,6 +342,8 @@ else
                 var learner = allLearners.FirstOrDefault(l => l.LearnerId == LearnerIdFromQuery);
                 if (learner != null)
                     await ViewProfile(learner);
+                else
+                    errorMessage = "Learner not found or not in your school.";
             }
         }
         catch (Exception ex)

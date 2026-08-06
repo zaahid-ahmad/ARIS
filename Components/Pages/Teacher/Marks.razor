@@ -264,6 +264,12 @@
             return;
         }
 
+        if (!subjects.Any(s => s.SubjectId == selectedSubjectId))
+        {
+            errorMessage = "Subject not found.";
+            return;
+        }
+
         try
         {
             errorMessage = string.Empty;
@@ -294,6 +300,13 @@
 
     private async Task OpenMarksModal(Assessment assessment)
     {
+        if (!subjects.Any(s => s.SubjectId == assessment.SubjectId) ||
+            assessment.SubjectId != selectedSubjectId)
+        {
+            errorMessage = "Assessment not found.";
+            return;
+        }
+
         selectedAssessment = assessment;
         assessmentQuestions.Clear();
         marks.Clear();

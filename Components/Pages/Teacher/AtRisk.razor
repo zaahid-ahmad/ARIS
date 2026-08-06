@@ -158,6 +158,12 @@ else
         {
             if (selectedSubjectId == 0) return;
 
+            if (!subjects.Any(s => s.SubjectId == selectedSubjectId))
+            {
+                errorMessage = "Subject not found.";
+                return;
+            }
+
             hasLoaded = false;
             learnerRiskCache.Clear();
             atRiskLearners.Clear();
