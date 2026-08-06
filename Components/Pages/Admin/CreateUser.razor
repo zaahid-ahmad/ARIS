@@ -146,10 +146,23 @@
         if (role == "Learner" && string.IsNullOrWhiteSpace(grade))
         { gradeError = "Please select a grade."; valid = false; }
 
-        if (role == "Learner" && string.IsNullOrWhiteSpace(className))
-        { classNameError = "Please enter a class."; valid = false; }
+        if (role == "Learner")
+        {
+            if (string.IsNullOrWhiteSpace(className))
+            { classNameError = "Please enter a class."; valid = false; }
+            else if (!IsValidClassName(className, grade))
+            { classNameError = $"Class must be grade {grade} followed by a single letter, e.g. {grade}A."; valid = false; }
+        }
 
         return valid;
+    }
+
+    private static bool IsValidClassName(string value, string gradeDigits)
+    {
+        var v = value.Trim().ToUpperInvariant();
+        return v.Length == gradeDigits.Length + 1
+            && v.StartsWith(gradeDigits, StringComparison.Ordinal)
+            && v[^1] >= 'A' && v[^1] <= 'Z';
     }
 
     private async Task CreateUserAsync()
@@ -202,7 +215,7 @@
                     {
                         UserId = user.Id,
                         Grade = int.Parse(grade),
-                        ClassName = className.Trim(),
+                        ClassName = className.Trim().ToUpperInvariant(),
                         EnrollmentYear = DateTime.Now.Year
                     };
                     DbContext.Learners.Add(learner);
