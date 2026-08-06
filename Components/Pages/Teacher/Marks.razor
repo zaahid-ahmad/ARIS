@@ -67,7 +67,7 @@
                         <td>@assessment.Title</td>
                         <td>@(assessmentTypes.FirstOrDefault(t => t.AssessmentTypeId == assessment.AssessmentTypeId)?.Name ?? "-")</td>
                         <td>Term @assessment.Term</td>
-                        <td>@assessment.MaxMark</td>
+                        <td>@assessment.MaxMark.ToString("0.##")</td>
                         <td>@assessment.Date.ToString("dd MMM yyyy")</td>
                         <td>
                             <button class="btn btn-sm btn-primary"
@@ -91,7 +91,7 @@
                 <div class="modal-header">
                     <h5 class="modal-title">
                         Capture Marks — @selectedAssessment.Title
-                        <small class="text-muted ms-2">(Max: @selectedAssessment.MaxMark)</small>
+                        <small class="text-muted ms-2">(Max: @selectedAssessment.MaxMark.ToString("0.##"))</small>
                     </h5>
                     <button type="button" class="btn-close" @onclick="CloseMarksModal"></button>
                 </div>
@@ -113,7 +113,7 @@
                                             <th class="text-center">
                                                 Q@(question.QuestionNumber)<br />
                                                 <small class="text-muted">@question.Topic</small><br />
-                                                <small class="text-muted">/ @question.MaxMark</small>
+                                                <small class="text-muted">/ @question.MaxMark.ToString("0.##")</small>
                                             </th>
                                         }
                                         <th class="text-center">Total</th>
@@ -145,15 +145,20 @@
                                             @foreach (var question in assessmentQuestions)
                                             {
                                                 var key = $"{learner.LearnerId}_{question.QuestionId}";
+                                                var isInvalid = invalidMarks.Contains(key);
                                                 <td>
                                                     <input type="number"
-                                                           class="form-control form-control-sm"
+                                                           class="form-control form-control-sm @(isInvalid ? "is-invalid" : "")"
                                                            style="width: 75px;"
-                                                           @bind="marks[key]"
-                                                           @bind:after="() => OnMarkChanged(learner.LearnerId, question)"
+                                                           value="@(isInvalid ? "" : FormatMark(marks[key]))"
+                                                           @onchange="e => OnMarkInputChanged(e, learner.LearnerId, question)"
                                                            disabled="@isAbsent[learner.LearnerId]"
                                                            min="0"
-                                                           max="@question.MaxMark" />
+                                                           max="@FormatMark(question.MaxMark)" />
+                                                    @if (isInvalid)
+                                                    {
+                                                        <small class="text-danger">Max: @FormatMark(question.MaxMark)</small>
+                                                    }
                                                 </td>
                                             }
                                             <td class="text-center">
@@ -162,7 +167,7 @@
                                                     foreach (var q in assessmentQuestions)
                                                         total += marks[$"{learner.LearnerId}_{q.QuestionId}"];
                                                 }
-                                                <strong>@total.ToString("F1")</strong>
+                                                <strong>@total.ToString("0.##")</strong>
                                             </td>
                                             <td class="text-center">
                                                 <input type="checkbox"
@@ -197,6 +202,7 @@
     private Dictionary<int, bool> isAbsent = new();
     private Dictionary<int, LearnerSaveStatus> learnerSaveStatus = new();
     private Dictionary<int, CancellationTokenSource> debounceCts = new();
+    private HashSet<string> invalidMarks = new();
 
     private int selectedSubjectId = 0;
     private Assessment? selectedAssessment;
@@ -293,6 +299,7 @@
         marks.Clear();
         isAbsent.Clear();
         learnerSaveStatus.Clear();
+        invalidMarks.Clear();
         CancelAllDebounces();
         errorMessage = string.Empty;
 
@@ -349,6 +356,7 @@
         marks.Clear();
         isAbsent.Clear();
         learnerSaveStatus.Clear();
+        invalidMarks.Clear();
     }
 
     private void OnMarkChanged(int learnerId, AssessmentQuestion question)
@@ -395,7 +403,7 @@
             if (total > selectedAssessment.MaxMark)
             {
                 learnerSaveStatus[learnerId] = LearnerSaveStatus.Error;
-                errorMessage = $"Total marks ({total}) exceed the maximum of {selectedAssessment.MaxMark}.";
+                errorMessage = $"Total marks ({total:0.##}) exceed the maximum of {selectedAssessment.MaxMark:0.##}.";
                 await InvokeAsync(StateHasChanged);
                 return;
             }
@@ -497,6 +505,24 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private void OnMarkInputChanged(ChangeEventArgs e, int learnerId, AssessmentQuestion question)
+    {
+        var key = $"{learnerId}_{question.QuestionId}";
+        var v = decimal.TryParse(e.Value?.ToString(), out var parsed) ? parsed : 0m;
+
+        if (v > question.MaxMark || v < 0)
+        {
+            invalidMarks.Add(key);
+            return;
+        }
+
+        invalidMarks.Remove(key);
+        marks[key] = v;
+        OnMarkChanged(learnerId, question);
+    }
+
+    private static string FormatMark(decimal value) => value.ToString("0.##");
 
     private void ValidateMark(int learnerId, AssessmentQuestion question)
     {
