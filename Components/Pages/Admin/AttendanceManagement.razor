@@ -1,0 +1,289 @@
+@page "/admin/attendance"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h2>Attendance Management</h2>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+<div class="row mb-3">
+    <div class="col-md-2">
+        <label>Filter by Grade</label>
+        <select class="form-control" value="@filterGrade" @onchange="OnGradeChanged">
+            <option value="0">All Grades</option>
+            @foreach (var grade in grades)
+            {
+                <option value="@grade">Grade @grade</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label>Filter by Subject</label>
+        <select class="form-control" @bind="filterSubjectId">
+            <option value="0">All Subjects</option>
+            @foreach (var subject in subjectsForGrade)
+            {
+                <option value="@subject.SubjectId">@subject.Name</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label>From</label>
+        <input type="date" class="form-control" @bind="filterFrom" />
+    </div>
+    <div class="col-md-2">
+        <label>To</label>
+        <input type="date" class="form-control" @bind="filterTo" />
+    </div>
+    <div class="col-md-1 d-flex align-items-end">
+        <button class="btn btn-outline-secondary" @onclick="ClearDateFilter">Clear</button>
+    </div>
+</div>
+
+@{
+    var filteredSessions = sessions
+        .Where(s => filterGrade == 0 || s.Subject?.Grade == filterGrade)
+        .Where(s => filterSubjectId == 0 || s.SubjectId == filterSubjectId)
+        .Where(s => filterFrom == null || s.Date.Date >= filterFrom.Value.Date)
+        .Where(s => filterTo == null || s.Date.Date <= filterTo.Value.Date)
+        .ToList();
+}
+
+@if (filteredSessions.Count == 0)
+{
+    <p class="text-muted">No attendance sessions found.</p>
+}
+else
+{
+    <table class="table align-middle">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Subject</th>
+                <th>Teacher</th>
+                <th>Records</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var session in filteredSessions)
+            {
+                var isExpanded = expandedSessionIds.Contains(session.SessionId);
+
+                <tr>
+                    <td>@session.Date.ToString("dd MMM yyyy")</td>
+                    <td>@session.Time.ToString("HH:mm")</td>
+                    <td>@session.Subject?.Name</td>
+                    <td>@session.Teacher?.User?.Fullname</td>
+                    <td>@session.AttendanceRecords.Count</td>
+                    <td class="text-nowrap">
+                        <button class="btn btn-sm btn-outline-primary me-1"
+                                @onclick="() => ToggleExpand(session.SessionId)">
+                            @(isExpanded ? "Hide" : "View")
+                        </button>
+                        @if (confirmDeleteSessionId == session.SessionId)
+                        {
+                            <span class="me-2 text-danger fw-bold">Delete this session and all its records?</span>
+                            <button class="btn btn-sm btn-danger me-1" @onclick="() => DeleteSession(session.SessionId)">Yes, Delete</button>
+                            <button class="btn btn-sm btn-secondary" @onclick="CancelDelete">Cancel</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => confirmDeleteSessionId = session.SessionId">Delete</button>
+                        }
+                    </td>
+                </tr>
+
+                @if (isExpanded)
+                {
+                    <tr class="table-light">
+                        <td colspan="6" class="ps-4">
+                            @if (session.AttendanceRecords.Count == 0)
+                            {
+                                <p class="text-muted mb-0">No records in this session.</p>
+                            }
+                            else
+                            {
+                                var present = session.AttendanceRecords.Count(r => r.Status == "Present");
+                                var total = session.AttendanceRecords.Count;
+                                <p class="mb-2">
+                                    <strong>Present: @present / @total</strong>
+                                </p>
+                                <table class="table table-sm mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Learner</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var record in session.AttendanceRecords.OrderBy(r => r.Learner?.User?.Fullname))
+                                        {
+                                            <tr>
+                                                <td>@record.Learner?.User?.Fullname</td>
+                                                <td>
+                                                    <span class="badge bg-@StatusColor(record.Status)">
+                                                        @record.Status
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Subject> subjects = new();
+    private List<int> grades = new();
+    private List<Subject> subjectsForGrade = new();
+    private List<AttendanceSession> sessions = new();
+    private HashSet<int> expandedSessionIds = new();
+    private int filterGrade = 0;
+    private int filterSubjectId = 0;
+    private DateTime? filterFrom;
+    private DateTime? filterTo;
+    private int? confirmDeleteSessionId;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private int? schoolId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+            schoolId = user?.SchoolId;
+
+            if (schoolId == null)
+            {
+                errorMessage = "You are not assigned to a school.";
+                return;
+            }
+
+            subjects = await DbContext.Subjects
+                .AsNoTracking()
+                .Where(s => s.SchoolId == schoolId)
+                .OrderBy(s => s.Grade).ThenBy(s => s.Name)
+                .ToListAsync();
+
+            grades = subjects.Select(s => s.Grade).Distinct().OrderBy(g => g).ToList();
+            subjectsForGrade = subjects;
+
+            await LoadSessions();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading data: {ex.Message}";
+        }
+    }
+
+    private async Task LoadSessions()
+    {
+        var subjectIds = subjects.Select(s => s.SubjectId).ToList();
+
+        sessions = await DbContext.AttendanceSessions
+            .Where(s => subjectIds.Contains(s.SubjectId))
+            .Include(s => s.Subject)
+            .Include(s => s.Teacher).ThenInclude(t => t.User)
+            .Include(s => s.AttendanceRecords)
+                .ThenInclude(r => r.Learner).ThenInclude(l => l.User)
+            .OrderByDescending(s => s.Date)
+            .ThenByDescending(s => s.Time)
+            .ToListAsync();
+    }
+
+    private void ClearDateFilter()
+    {
+        filterFrom = null;
+        filterTo = null;
+    }
+
+    private void OnGradeChanged(ChangeEventArgs e)
+    {
+        filterGrade = int.TryParse(e.Value?.ToString(), out var g) ? g : 0;
+        filterSubjectId = 0;
+        subjectsForGrade = filterGrade == 0
+            ? subjects
+            : subjects.Where(s => s.Grade == filterGrade).ToList();
+    }
+
+    private void ToggleExpand(int sessionId)
+    {
+        if (!expandedSessionIds.Remove(sessionId))
+            expandedSessionIds.Add(sessionId);
+    }
+
+    private async Task DeleteSession(int sessionId)
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        await using var transaction = await DbContext.Database.BeginTransactionAsync();
+        try
+        {
+            var records = await DbContext.AttendanceRecords
+                .Where(r => r.SessionId == sessionId)
+                .ToListAsync();
+
+            DbContext.AttendanceRecords.RemoveRange(records);
+            await DbContext.SaveChangesAsync();
+
+            var session = await DbContext.AttendanceSessions.FindAsync(sessionId);
+            if (session != null)
+            {
+                DbContext.AttendanceSessions.Remove(session);
+                await DbContext.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+            successMessage = "Session deleted successfully.";
+            confirmDeleteSessionId = null;
+            expandedSessionIds.Remove(sessionId);
+            await LoadSessions();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            errorMessage = $"Error deleting session: {ex.Message}";
+            confirmDeleteSessionId = null;
+        }
+    }
+
+    private void CancelDelete()
+    {
+        confirmDeleteSessionId = null;
+    }
+
+    private static string StatusColor(string status) => status switch
+    {
+        "Present" => "success",
+        "Absent"  => "danger",
+        "Late"    => "warning",
+        "Excused" => "secondary",
+        _         => "light"
+    };
+}

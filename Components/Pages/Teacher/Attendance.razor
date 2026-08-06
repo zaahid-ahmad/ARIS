@@ -1,4 +1,4 @@
-﻿@page "/teacher/attendance"
+@page "/teacher/attendance"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
@@ -38,7 +38,9 @@
         </div>
         <div class="mb-3">
             <label>Date</label>
-            <input type="date" class="form-control" @bind="sessionDate" />
+            <input type="date" class="form-control"
+                   max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                   @bind="sessionDate" />
         </div>
         <button class="btn btn-primary" @onclick="LoadLearners">Load Learners</button>
     </div>
@@ -46,7 +48,13 @@
 
 @if (learners.Count > 0)
 {
-    <h4>Mark Attendance for @sessionDate.ToString("dd MMM yyyy")</h4>
+    <h4>
+        @(existingSession != null ? "Editing" : "New") Attendance — @sessionDate.ToString("dd MMM yyyy") @sessionTime.ToString("HH:mm")
+        @if (existingSession != null)
+        {
+            <span class="badge bg-warning text-dark ms-2">Editing existing session</span>
+        }
+    </h4>
     <table class="table">
         <thead>
             <tr>
@@ -57,32 +65,86 @@
         <tbody>
             @foreach (var learner in learners)
             {
+                var status = attendanceStatus.TryGetValue(learner.LearnerId, out var s) ? s : "";
+                var isInvalid = invalidStatuses.Contains(learner.LearnerId);
                 <tr>
                     <td>@learner.User?.Fullname</td>
                     <td>
-                        <select class="form-control"
-                                @bind="attendanceStatus[learner.LearnerId]">
-                            <option value="Present">Present</option>
-                            <option value="Absent">Absent</option>
-                            <option value="Late">Late</option>
-                            <option value="Excused">Excused</option>
+                        <select class="form-control @(isInvalid ? "is-invalid" : "")"
+                                value="@status"
+                                @onchange="e => OnStatusChanged(learner.LearnerId, e.Value?.ToString())">
+                            <option value="">-- Select --</option>
+                            <option value="@AttendanceStatus.Present">Present</option>
+                            <option value="@AttendanceStatus.Absent">Absent</option>
+                            <option value="@AttendanceStatus.Late">Late</option>
+                            <option value="@AttendanceStatus.Excused">Excused</option>
                         </select>
+                        @if (isInvalid)
+                        {
+                            <small class="text-danger">Please select a status.</small>
+                        }
                     </td>
                 </tr>
             }
         </tbody>
     </table>
     <button class="btn btn-success mt-2" @onclick="SaveAttendance">
-        Save Attendance
+        @(existingSession != null ? "Update Attendance" : "Save Attendance")
     </button>
+    <button class="btn btn-secondary mt-2 ms-2" @onclick="ClearForm">Cancel</button>
+}
+
+@if (pastSessions.Count > 0)
+{
+    <hr />
+    <h5>Recent Sessions</h5>
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Subject</th>
+                <th>Records</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var session in pastSessions)
+            {
+                <tr>
+                    <td>@session.Date.ToString("dd MMM yyyy")</td>
+                    <td>@session.Time.ToString("HH:mm")</td>
+                    <td>@session.Subject?.Name</td>
+                    <td>@session.AttendanceRecords.Count</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => LoadSession(session)">
+                            Edit
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
 }
 
 @code {
+    private static class AttendanceStatus
+    {
+        public const string Present = "Present";
+        public const string Absent = "Absent";
+        public const string Late = "Late";
+        public const string Excused = "Excused";
+    }
+
     private List<Subject> subjects = new();
     private List<Learner> learners = new();
     private Dictionary<int, string> attendanceStatus = new();
+    private HashSet<int> invalidStatuses = new();
+    private List<AttendanceSession> pastSessions = new();
+    private AttendanceSession? existingSession;
     private int selectedSubjectId = 0;
     private DateTime sessionDate = DateTime.Today;
+    private TimeOnly sessionTime = new TimeOnly(DateTime.Now.Hour, DateTime.Now.Minute);
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private Teacher? currentTeacher;
@@ -114,11 +176,12 @@
                 return;
             }
 
-            // Only load subjects from this teacher's school
             subjects = await DbContext.Subjects
                 .AsNoTracking()
-                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)  // ← Filter by school
+                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)
                 .ToListAsync();
+
+            await LoadPastSessions();
         }
         catch (Exception ex)
         {
@@ -126,17 +189,46 @@
         }
     }
 
+    private void OnStatusChanged(int learnerId, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            attendanceStatus.Remove(learnerId);
+            invalidStatuses.Add(learnerId);
+        }
+        else
+        {
+            attendanceStatus[learnerId] = value;
+            invalidStatuses.Remove(learnerId);
+        }
+    }
+
     private async Task LoadLearners()
     {
         try
         {
+            errorMessage = string.Empty;
+            successMessage = string.Empty;
+
             if (selectedSubjectId == 0)
             {
                 errorMessage = "Please select a subject.";
                 return;
             }
 
-            errorMessage = string.Empty;
+            // Verify teacher owns this subject
+            if (!subjects.Any(s => s.SubjectId == selectedSubjectId))
+            {
+                errorMessage = "Subject not found.";
+                return;
+            }
+
+            // Prevent future dates
+            if (sessionDate > DateTime.Today)
+            {
+                errorMessage = "Cannot capture attendance for a future date.";
+                return;
+            }
 
             learners = await DbContext.LearnerSubjects
                 .AsNoTracking()
@@ -147,9 +239,30 @@
                 .ToListAsync();
 
             attendanceStatus.Clear();
-            foreach (var learner in learners)
+            invalidStatuses.Clear();
+
+            // Capture current time (hours+minutes) for new sessions
+            var now = new TimeOnly(DateTime.Now.Hour, DateTime.Now.Minute);
+
+            // Check for an existing session on this date+time for this subject
+            existingSession = await DbContext.AttendanceSessions
+                .Include(s => s.AttendanceRecords)
+                .FirstOrDefaultAsync(s => s.SubjectId == selectedSubjectId &&
+                                          s.Date.Date == sessionDate.Date &&
+                                          s.Time == now);
+
+            if (existingSession != null)
             {
-                attendanceStatus[learner.LearnerId] = "Present";
+                sessionTime = existingSession.Time;
+                // Pre-populate statuses from existing records
+                foreach (var record in existingSession.AttendanceRecords)
+                {
+                    attendanceStatus[record.LearnerId] = record.Status;
+                }
+            }
+            else
+            {
+                sessionTime = now;
             }
         }
         catch (Exception ex)
@@ -158,48 +271,142 @@
         }
     }
 
+    private async Task LoadSession(AttendanceSession session)
+    {
+        selectedSubjectId = session.SubjectId;
+        sessionDate = session.Date;
+        sessionTime = session.Time;
+        await LoadLearners();
+    }
+
     private async Task SaveAttendance()
     {
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
+        if (selectedSubjectId == 0 || learners.Count == 0)
+        {
+            errorMessage = "Please load learners first.";
+            return;
+        }
+
+        // Validate all statuses are set
+        invalidStatuses.Clear();
+        foreach (var learner in learners)
+        {
+            if (!attendanceStatus.TryGetValue(learner.LearnerId, out var s) || string.IsNullOrEmpty(s))
+                invalidStatuses.Add(learner.LearnerId);
+        }
+
+        if (invalidStatuses.Count > 0)
+        {
+            errorMessage = "Please select a status for every learner.";
+            return;
+        }
+
+        // Server-side date check
+        if (sessionDate > DateTime.Today)
+        {
+            errorMessage = "Cannot capture attendance for a future date.";
+            return;
+        }
+
+        var normalizedTime = new TimeOnly(sessionTime.Hour, sessionTime.Minute);
+
+        await using var transaction = await DbContext.Database.BeginTransactionAsync();
         try
         {
-            if (selectedSubjectId == 0 || learners.Count == 0)
+            if (existingSession != null)
             {
-                errorMessage = "Please load learners first.";
-                return;
-            }
+                // Update existing records
+                var existingRecords = await DbContext.AttendanceRecords
+                    .Where(r => r.SessionId == existingSession.SessionId)
+                    .ToListAsync();
 
-            var session = new AttendanceSession
-            {
-                SubjectId = selectedSubjectId,
-                TeacherId = currentTeacher!.TeacherId,
-                Date = sessionDate,
-            };
-
-            DbContext.AttendanceSessions.Add(session);
-            await DbContext.SaveChangesAsync();
-
-            foreach (var learner in learners)
-            {
-                var record = new AttendanceRecord
+                foreach (var learner in learners)
                 {
-                    SessionId = session.SessionId,
-                    LearnerId = learner.LearnerId,
-                    Status = attendanceStatus[learner.LearnerId]
+                    var record = existingRecords.FirstOrDefault(r => r.LearnerId == learner.LearnerId);
+                    if (record != null)
+                    {
+                        record.Status = attendanceStatus[learner.LearnerId];
+                    }
+                    else
+                    {
+                        DbContext.AttendanceRecords.Add(new AttendanceRecord
+                        {
+                            SessionId = existingSession.SessionId,
+                            LearnerId = learner.LearnerId,
+                            Status = attendanceStatus[learner.LearnerId]
+                        });
+                    }
+                }
+
+                await DbContext.SaveChangesAsync();
+            }
+            else
+            {
+                var session = new AttendanceSession
+                {
+                    SubjectId = selectedSubjectId,
+                    TeacherId = currentTeacher!.TeacherId,
+                    Date = sessionDate.Date,
+                    Time = normalizedTime,
                 };
-                DbContext.AttendanceRecords.Add(record);
+
+                DbContext.AttendanceSessions.Add(session);
+                await DbContext.SaveChangesAsync();
+
+                foreach (var learner in learners)
+                {
+                    DbContext.AttendanceRecords.Add(new AttendanceRecord
+                    {
+                        SessionId = session.SessionId,
+                        LearnerId = learner.LearnerId,
+                        Status = attendanceStatus[learner.LearnerId]
+                    });
+                }
+
+                await DbContext.SaveChangesAsync();
             }
 
-            await DbContext.SaveChangesAsync();
-            successMessage = "Attendance saved successfully!";
-            learners.Clear();
-            attendanceStatus.Clear();
+            await transaction.CommitAsync();
+            successMessage = existingSession != null
+                ? "Attendance updated successfully!"
+                : "Attendance saved successfully!";
+
+            await LoadPastSessions();
+            ClearForm();
         }
         catch (Exception ex)
         {
+            await transaction.RollbackAsync();
             errorMessage = $"Error saving attendance: {ex.Message}";
         }
+    }
+
+    private async Task LoadPastSessions()
+    {
+        if (currentTeacher == null) return;
+
+        pastSessions = await DbContext.AttendanceSessions
+            .AsNoTracking()
+            .Where(s => subjects.Select(sub => sub.SubjectId).Contains(s.SubjectId))
+            .Include(s => s.Subject)
+            .Include(s => s.AttendanceRecords)
+            .OrderByDescending(s => s.Date)
+            .ThenByDescending(s => s.Time)
+            .Take(10)
+            .ToListAsync();
+    }
+
+    private void ClearForm()
+    {
+        learners.Clear();
+        attendanceStatus.Clear();
+        invalidStatuses.Clear();
+        existingSession = null;
+        selectedSubjectId = 0;
+        sessionDate = DateTime.Today;
+        sessionTime = new TimeOnly(DateTime.Now.Hour, DateTime.Now.Minute);
     }
 }

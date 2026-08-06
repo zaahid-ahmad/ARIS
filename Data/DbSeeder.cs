@@ -40,8 +40,8 @@ namespace ARIS1.Data
                 context.Schools.Add(defaultSchool);
                 await context.SaveChangesAsync();
 
-                // Assign this school to all existing subjects
-                var subjects = context.Subjects.ToList();
+                // Assign this school to any subjects that have no school yet
+                var subjects = context.Subjects.Where(s => s.SchoolId == 0).ToList();
                 foreach (var subject in subjects)
                 {
                     subject.SchoolId = defaultSchool.SchoolId;

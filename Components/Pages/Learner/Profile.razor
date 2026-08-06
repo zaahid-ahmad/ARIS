@@ -72,7 +72,7 @@ else
                                         var percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
                                         <tr>
                                             <td>@mark.Assessment.Title</td>
-                                            <td>@mark.MarksAwarded / @mark.Assessment.MaxMark (@percentage.ToString("F1")%)</td>
+                                            <td>@mark.MarksAwarded.ToString("0.##") / @mark.Assessment.MaxMark.ToString("0.##") (@percentage.ToString("F1")%)</td>
                                         </tr>
                                     }
                                 </tbody>
@@ -95,14 +95,16 @@ else
                                 <thead>
                                     <tr>
                                         <th>Date</th>
+                                        <th>Time</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach (var record in subjectAttendance.OrderByDescending(ar => ar.Session.Date))
+                                    @foreach (var record in subjectAttendance.OrderByDescending(ar => ar.Session.Date).ThenByDescending(ar => ar.Session.Time))
                                     {
                                         <tr>
                                             <td>@record.Session.Date.ToString("dd MMM yyyy")</td>
+                                            <td>@record.Session.Time.ToString("HH:mm")</td>
                                             <td>@record.Status</td>
                                         </tr>
                                     }

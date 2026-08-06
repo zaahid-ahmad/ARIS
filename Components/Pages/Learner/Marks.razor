@@ -59,7 +59,7 @@ else
                                 var percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
                                 <tr>
                                     <td>@mark.Assessment.Title</td>
-                                    <td>@mark.MarksAwarded / @mark.Assessment.MaxMark</td>
+                                    <td>@mark.MarksAwarded.ToString("0.##") / @mark.Assessment.MaxMark.ToString("0.##")</td>
                                     <td>@percentage.ToString("F1")%</td>
                                 </tr>
                             }

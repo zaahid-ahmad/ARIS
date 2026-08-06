@@ -334,7 +334,7 @@ else
                                             <tr>
                                                 <td>@assessment.Title</td>
                                                 <td>@assessment.AssessmentType?.Name</td>
-                                                <td>@assessment.MaxMark</td>
+                                                <td>@assessment.MaxMark.ToString("0.##")</td>
                                                 <td>Term @assessment.Term</td>
                                                 <td>@assessment.Date.ToString("dd MMM yyyy")</td>
                                                 <td>
@@ -420,7 +420,7 @@ else
                                                 <tr>
                                                     <td>@question.QuestionNumber</td>
                                                     <td>@question.Topic</td>
-                                                    <td>@question.MaxMark</td>
+                                                    <td>@question.MaxMark.ToString("0.##")</td>
                                                     <td>
                                                         <button class="btn btn-danger btn-sm" @onclick="() => DeleteQuestion(question)">Delete</button>
                                                     </td>
@@ -429,7 +429,7 @@ else
                                         </tbody>
                                     </table>
                                     <p class="text-muted text-sm">
-                                        Total: <strong>@assessmentQuestions.Sum(q => q.MaxMark)</strong> / <strong>@selectedAssessment.MaxMark</strong> max
+                                        Total: <strong>@assessmentQuestions.Sum(q => q.MaxMark).ToString("0.##")</strong> / <strong>@selectedAssessment.MaxMark.ToString("0.##")</strong> max
                                     </p>
                                 }
 

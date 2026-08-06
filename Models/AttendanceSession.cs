@@ -9,6 +9,7 @@ namespace ARIS1.Models
         public int SubjectId { get; set; }
         public Subject Subject { get; set; } = null!;
         public DateTime Date { get; set; }
+        public TimeOnly Time { get; set; }
         public int TeacherId { get; set; }
         public Teacher Teacher { get; set; } = null!;
         public string? Notes { get; set; }
