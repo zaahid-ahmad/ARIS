@@ -540,9 +540,9 @@ else
                                             <td>@node.Name</td>
                                             <td>
                                                 <input type="number" class="form-control form-control-sm"
-                                                       @bind="node.Weighting"
-                                                       @bind:after="RecalculateWeightTotal"
-                                                       min="0" max="100" step="0.1" />
+                                                       value="@FormatWeight(node.Weighting)"
+                                                       @onchange="@(e => OnWeightChanged(node, e.Value?.ToString()))"
+                                                       min="0" max="100" step="any" />
                                             </td>
                                         </tr>
                                     }
@@ -552,7 +552,7 @@ else
                                         <td><strong>Total</strong></td>
                                         <td>
                                             <span class="fw-bold @(Math.Abs(weightTotal - 100m) > 0.001m ? "text-danger" : "text-success")">
-                                                @weightTotal.ToString("F1")%
+                                                @weightTotal.ToString("0.##")%
                                                 @(Math.Abs(weightTotal - 100m) > 0.001m ? "⚠ Must be 100%" : "✓")
                                             </span>
                                         </td>
@@ -1414,6 +1414,16 @@ else
         }
     }
 
+    private static string FormatWeight(decimal w) => w.ToString("0.##");
+
+    private void OnWeightChanged(WeightingNode node, string? rawValue)
+    {
+        if (decimal.TryParse(rawValue, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var v))
+            node.Weighting = Math.Max(0m, Math.Min(100m, v));
+        RecalculateWeightTotal();
+    }
+
     private void RecalculateWeightTotal()
     {
         weightTotal = weightingStructure?.RootNodes?.Sum(n => n.Weighting) ?? 0m;
@@ -1428,7 +1438,7 @@ else
 
             if (Math.Abs(weightTotal - 100m) > 0.001m)
             {
-                weightError = $"Weights must sum to 100%. Current: {weightTotal}%";
+                weightError = $"Weights must sum to 100%. Current: {weightTotal.ToString("0.##")}%";
                 return;
             }
 
