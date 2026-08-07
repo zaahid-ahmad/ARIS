@@ -10,6 +10,7 @@
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
+@inject ARIS1.Services.IChatAssistantService ChatAssistant
 
 <h2>Learning Support Hub</h2>
 
@@ -174,6 +175,7 @@
         public string Subject { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Level { get; set; } = string.Empty;
+        public List<string> Topics { get; set; } = new();
         public List<string> Solutions { get; set; } = new();
     }
 
@@ -207,13 +209,14 @@
                 foreach (var group in subjectGroups)
                 {
                     var maxLevel = group.OrderByDescending(i => GetLevelScore(i.Level)).First();
-                    var topicCount = group.Select(i => i.Topic).Distinct().Count();
+                    var topics = group.Select(i => i.Topic).Distinct().ToList();
 
                     areasOfConcern.Add(new ConcernItem
                     {
                         Subject = group.Key,
-                        Description = $"Struggling with {topicCount} topic(s)",
+                        Description = $"Struggling with {topics.Count} topic(s)",
                         Level = maxLevel.Level,
+                        Topics = topics,
                         Solutions = new()
                         {
                             "Review key concepts",
@@ -281,10 +284,13 @@
         AddMessage("user", text);
         userInput = string.Empty;
         isTyping = true;
+        StateHasChanged();
 
-        await Task.Delay(1000);
+        var concerns = areasOfConcern
+            .Select(c => new ARIS1.Services.ChatConcern(c.Subject, c.Level, c.Topics))
+            .ToList();
+        var response = await ChatAssistant.GetResponseAsync(text, concerns);
 
-        var response = GenerateBotResponse(text);
         AddMessage("bot", response);
         isTyping = false;
     }
@@ -292,19 +298,5 @@
     private void AddMessage(string sender, string text)
     {
         messages.Add(new ChatMessage { Sender = sender, Text = text });
-    }
-
-    private string GenerateBotResponse(string input)
-    {
-        var responses = new[]
-        {
-            "Great question! Start by reviewing the fundamentals, then practice with similar problems.",
-            "I understand. Break down the problem into smaller steps and practice consistently.",
-            "Excellent! Set a study schedule, focus on weak areas, and review regularly.",
-            "Good thinking! Review the core concepts first, then apply them to practice problems.",
-            "Remember, improvement takes time and effort. Let's work through this together!"
-        };
-
-        return responses[new Random().Next(responses.Length)];
     }
 }

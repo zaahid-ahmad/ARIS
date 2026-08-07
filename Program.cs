@@ -19,6 +19,19 @@ builder.Services.AddScoped<InterventionService>();
 builder.Services.AddScoped<WeightCalculationService>();
 builder.Services.AddScoped<SchoolAuthorizationService>();
 
+// Support.razor depends only on IChatAssistantService — falls back to the free
+// rule-based bot when no Gemini API key is configured (set via user-secrets:
+// dotnet user-secrets set "Gemini:ApiKey" "<your-key>").
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Gemini:ApiKey"]))
+{
+    builder.Services.AddHttpClient<GeminiChatAssistantService>();
+    builder.Services.AddScoped<IChatAssistantService>(sp => sp.GetRequiredService<GeminiChatAssistantService>());
+}
+else
+{
+    builder.Services.AddScoped<IChatAssistantService, RuleBasedChatAssistantService>();
+}
+
 // Add Database Context
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
