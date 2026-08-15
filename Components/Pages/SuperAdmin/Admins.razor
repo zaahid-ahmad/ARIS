@@ -147,7 +147,7 @@ else
                     <div class="mb-3">
                         <label>New Temporary Password</label>
                         <div class="input-group">
-                            <input class="form-control" type="text" @bind="tempPassword" readonly />
+                            <input class="form-control" type="text" @bind="tempPassword" />
                             <button class="btn btn-secondary" @onclick="GenerateTempPassword">Generate</button>
                         </div>
                     </div>
@@ -408,11 +408,13 @@ else
 
         var random = new Random();
 
-        // Guarantee the two enforced rules: at least one lowercase and one digit
+        // Guarantee all four enforced rules: lowercase, uppercase, digit, and symbol
         var chars = new List<char>
     {
         lower[random.Next(lower.Length)],
-        digits[random.Next(digits.Length)]
+        upper[random.Next(upper.Length)],
+        digits[random.Next(digits.Length)],
+        symbols[random.Next(symbols.Length)]
     };
 
         // Fill the rest up to length 12 from the full set
