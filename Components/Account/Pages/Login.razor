@@ -78,6 +78,12 @@
                 return;
             }
 
+            if (!user.IsActive)
+            {
+                errorMessage = "Error: This account has been deactivated. Contact your administrator.";
+                return;
+            }
+
             // Validate school code
             bool schoolCodeValid = false;
 
@@ -88,12 +94,17 @@
             }
             else
             {
-                // Regular users must have matching school code
+                // Regular users must have matching school code, and the school must be active
                 if (user.SchoolId.HasValue)
                 {
                     var userSchool = await DbContext.Schools
                         .FirstOrDefaultAsync(s => s.SchoolId == user.SchoolId &&
                                                   s.Code.ToUpper() == Input.SchoolCode.ToUpper());
+                    if (userSchool != null && !userSchool.IsActive)
+                    {
+                        errorMessage = "Error: This school has been deactivated. Contact your administrator.";
+                        return;
+                    }
                     schoolCodeValid = userSchool != null;
                 }
             }
