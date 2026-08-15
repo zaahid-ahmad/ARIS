@@ -1,19 +1,213 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+<AuthorizeView>
+    <Authorized>
+        <div class="app-shell active">
+            <nav class="sidebar" id="arisSidebar">
+                <div class="sidebar-brand">
+                    <div class="sidebar-logo" onclick="toggleAppSidebar()" style="cursor:pointer;"><i class="fas fa-graduation-cap"></i></div>
+                    <div class="sidebar-brand-text">ARIS</div>
+                </div>
 
-    <main>
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+                <NavMenu />
+
+                <AuthorizeView Roles="Learner" Context="chatContext">
+                    <Authorized>
+                        <div class="sidebar-ai-section">
+                            <a href="/learner/support" class="ai-action">
+                                <span class="ai-icon"><i class="fas fa-robot"></i></span>
+                                <span>Chat Assistant</span>
+                            </a>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+
+                <div class="sidebar-bottom">
+                    <form action="/Account/Logout" method="post">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ReturnUrl" value="@currentUrl" />
+                        <button type="submit" class="sidebar-action">
+                            <i class="fas fa-sign-out-alt"></i> <span>Sign Out</span>
+                        </button>
+                    </form>
+                </div>
+            </nav>
+
+            <div class="main-area">
+                <div class="top-icons-bar">
+                    <div class="page-title-area">
+                        <div class="header-title">@GetPageTitle()</div>
+                        <div class="header-sub">@RoleLabel(context.User)</div>
+                    </div>
+                    <div class="header-actions" style="position:relative;">
+                        <button class="hdr-btn profile-btn" onclick="toggleAppProfilePanel()" title="My Profile">
+                            <span class="profile-avatar" style="background:@AvatarColor(context.User)">@GetInitials(DisplayNameOf(context.User))</span>
+                        </button>
+                        <div class="profile-panel" id="arisProfilePanel">
+                            <div class="profile-panel-header">
+                                <div class="profile-panel-avatar" style="background:@AvatarColor(context.User)"><i class="fas @RoleIcon(context.User)"></i></div>
+                                <div>
+                                    <div class="profile-panel-name">@DisplayNameOf(context.User)</div>
+                                </div>
+                            </div>
+                            <div class="profile-panel-body">
+                                <a class="profile-panel-btn" href="@ProfileHref(context.User)">
+                                    <i class="fas fa-user-edit"></i> Edit Profile
+                                </a>
+                                <a class="profile-panel-btn" href="/Account/Manage/ChangePassword">
+                                    <i class="fas fa-key"></i> Change Password
+                                </a>
+                            </div>
+                            <div class="profile-panel-footer">
+                                <form action="/Account/Logout" method="post">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="ReturnUrl" value="@currentUrl" />
+                                    <button type="submit" class="profile-panel-btn signout-btn">
+                                        <i class="fas fa-sign-out-alt"></i> Sign Out
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page-content">
+                    @Body
+                </div>
+            </div>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        @Body
+    </NotAuthorized>
+</AuthorizeView>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+<script>
+    function toggleAppSidebar() {
+        const sidebar = document.getElementById('arisSidebar');
+        if (!sidebar) return;
+        sidebar.classList.toggle('collapsed');
+        localStorage.setItem('aris-sidebar-collapsed', sidebar.classList.contains('collapsed'));
+    }
+
+    function toggleAppProfilePanel() {
+        const panel = document.getElementById('arisProfilePanel');
+        if (!panel) return;
+        panel.classList.toggle('open');
+    }
+
+    function restoreAppSidebarState() {
+        const collapsed = localStorage.getItem('aris-sidebar-collapsed') === 'true';
+        const sidebar = document.getElementById('arisSidebar');
+        if (sidebar) sidebar.classList.toggle('collapsed', collapsed);
+    }
+
+    document.addEventListener('DOMContentLoaded', restoreAppSidebarState);
+    document.addEventListener('enhancedload', restoreAppSidebarState);
+
+    document.addEventListener('click', function (e) {
+        const panel = document.getElementById('arisProfilePanel');
+        const btn = e.target.closest('.profile-btn');
+        if (panel && panel.classList.contains('open') && !panel.contains(e.target) && !btn) {
+            panel.classList.remove('open');
+        }
+    });
+</script>
+
+@code {
+    private string? currentUrl;
+
+    protected override void OnInitialized()
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+    }
+
+    [Inject]
+    private NavigationManager NavigationManager { get; set; } = default!;
+
+    private string DisplayNameOf(System.Security.Claims.ClaimsPrincipal user)
+    {
+        var fullname = user.FindFirst("Fullname")?.Value;
+        return !string.IsNullOrWhiteSpace(fullname) ? fullname : (user.Identity?.Name ?? "?");
+    }
+
+    private string RoleOf(System.Security.Claims.ClaimsPrincipal user) => user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
+
+    private string GetInitials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var local = name.Split('@')[0];
+        var parts = local.Split(new[] { '.', '_', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2) return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+        return local.Length > 0 ? local.Substring(0, Math.Min(2, local.Length)).ToUpper() : "?";
+    }
+
+    private string AvatarColor(System.Security.Claims.ClaimsPrincipal user) => RoleOf(user) switch
+    {
+        "SuperAdmin" => "var(--purple, #7c3aed)",
+        "Admin" => "var(--blue, #1a56c4)",
+        "Teacher" => "var(--orange, #d97706)",
+        "Learner" => "var(--green, #16a34a)",
+        _ => "var(--ink-3, #6b7280)"
+    };
+
+    private string RoleIcon(System.Security.Claims.ClaimsPrincipal user) => RoleOf(user) switch
+    {
+        "SuperAdmin" => "fa-user-shield",
+        "Admin" => "fa-user-tie",
+        "Teacher" => "fa-chalkboard-teacher",
+        "Learner" => "fa-user-graduate",
+        _ => "fa-user"
+    };
+
+    private string RoleLabel(System.Security.Claims.ClaimsPrincipal user) => RoleOf(user) switch
+    {
+        "SuperAdmin" => "Super Administrator",
+        "Admin" => "School Administrator",
+        "Teacher" => "Educator",
+        "Learner" => "Learner",
+        _ => "User"
+    };
+
+    private string ProfileHref(System.Security.Claims.ClaimsPrincipal user) => RoleOf(user) switch
+    {
+        "Learner" => "/learner/profile",
+        _ => "/Account/Manage"
+    };
+
+    private string GetPageTitle()
+    {
+        var path = (currentUrl ?? "").Trim('/').ToLowerInvariant();
+        return path switch
+        {
+            "" => "Home",
+            "superadmin/dashboard" => "Dashboard",
+            "superadmin/schools" => "Schools",
+            "superadmin/admins" => "Staff Registry",
+            "admin/dashboard" => "Dashboard",
+            "admin/users" => "User Management",
+            "admin/users/create" => "Create User",
+            "admin/subjects" => "Subject Structure",
+            "admin/enrollment" => "Learner Enrollment",
+            "admin/attendance" => "Attendance",
+            "teacher/dashboard" => "Dashboard",
+            "teacher/marks" => "Mark Entry",
+            "teacher/atrisk" => "Risk & Interventions",
+            "teacher/attendance" => "Attendance",
+            "teacher/learnerprofiles" => "Learner Profiles",
+            "learner/dashboard" => "Dashboard",
+            "learner/marks" => "Marks",
+            "learner/attendance" => "Attendance",
+            "learner/profile" => "My Profile",
+            "learner/support" => "Chat Assistant",
+            "account/manage" => "My Account",
+            _ => "ARIS"
+        };
+    }
+}

@@ -1,75 +1,108 @@
-﻿@implements IDisposable
 @inject NavigationManager NavigationManager
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">ARIS</a>
-    </div>
-</div>
+@implements IDisposable
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+<nav class="sidebar-nav">
+    <AuthorizeView Roles="SuperAdmin" Context="superAdminContext">
+        <Authorized>
+            <div class="nav-section-label">SuperAdmin</div>
+            <a class="@NavClass("/superadmin/dashboard")" href="/superadmin/dashboard">
+                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
+            </a>
+            <a class="@NavClass("/superadmin/schools")" href="/superadmin/schools">
+                <i class="fas fa-building"></i> <span>Schools</span>
+            </a>
+            <a class="@NavClass("/superadmin/admins")" href="/superadmin/admins">
+                <i class="fas fa-users"></i> <span>Staff Registry</span>
+            </a>
+        </Authorized>
+    </AuthorizeView>
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
+    <AuthorizeView Roles="Admin" Context="adminContext">
+        <Authorized>
+            <div class="nav-section-label">Admin</div>
+            <a class="@NavClass("/admin/dashboard")" href="/admin/dashboard">
+                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
+            </a>
+            <a class="@NavClass("/admin/users")" href="/admin/users">
+                <i class="fas fa-users"></i> <span>User Management</span>
+            </a>
+            <a class="@NavClass("/admin/users/create")" href="/admin/users/create">
+                <i class="fas fa-user-plus"></i> <span>Create User</span>
+            </a>
+            <a class="@NavClass("/admin/subjects")" href="/admin/subjects">
+                <i class="fas fa-sitemap"></i> <span>Subject Structure</span>
+            </a>
+            <a class="@NavClass("/admin/enrollment")" href="/admin/enrollment">
+                <i class="fas fa-user-graduate"></i> <span>Learner Enrollment</span>
+            </a>
+            <a class="@NavClass("/admin/attendance")" href="/admin/attendance">
+                <i class="fas fa-calendar-check"></i> <span>Attendance</span>
+            </a>
+        </Authorized>
+    </AuthorizeView>
 
-        <AuthorizeView>
-            <Authorized>
-                <AuthorizeView Roles="SuperAdmin" Context="adminContext">
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="Account/Manage">
-                            <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> @context.User.Identity?.Name
-                        </NavLink>
-                    </div>
-                </AuthorizeView>
-                <div class="nav-item px-3">
-                    <form action="Account/Logout" method="post">
-                        <AntiforgeryToken />
-                        <input type="hidden" name="ReturnUrl" value="@currentUrl" />
-                        <button type="submit" class="nav-link">
-                            <span class="bi bi-arrow-bar-left-nav-menu" aria-hidden="true"></span> Logout
-                        </button>
-                    </form>
-                </div>
-                <AuthorizeView Roles="Learner" Context="learnerContext">
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="/learner/profile">
-                            <span class="bi bi-person-check-fill-nav-menu" aria-hidden="true"></span> My Profile
-                        </NavLink>
-                    </div>
-                </AuthorizeView>
-            </Authorized>
-            <NotAuthorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Account/Login">
-                        <span class="bi bi-person-badge-nav-menu" aria-hidden="true"></span> Login
-                    </NavLink>
-                </div>
-            </NotAuthorized>
-        </AuthorizeView>
-    </nav>
-</div>
+    <AuthorizeView Roles="Teacher" Context="teacherContext">
+        <Authorized>
+            <div class="nav-section-label">Teacher</div>
+            <a class="@NavClass("/teacher/dashboard")" href="/teacher/dashboard">
+                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
+            </a>
+            <a class="@NavClass("/teacher/marks")" href="/teacher/marks">
+                <i class="fas fa-pen-ruler"></i> <span>Mark Entry</span>
+            </a>
+            <a class="@NavClass("/teacher/atrisk")" href="/teacher/atrisk">
+                <i class="fas fa-exclamation-triangle"></i> <span>Risk &amp; Interventions</span>
+            </a>
+            <a class="@NavClass("/teacher/attendance")" href="/teacher/attendance">
+                <i class="fas fa-calendar-check"></i> <span>Attendance</span>
+            </a>
+            <a class="@NavClass("/teacher/learnerprofiles")" href="/teacher/learnerprofiles">
+                <i class="fas fa-id-card"></i> <span>Learner Profiles</span>
+            </a>
+        </Authorized>
+    </AuthorizeView>
+
+    <AuthorizeView Roles="Learner" Context="learnerContext">
+        <Authorized>
+            <div class="nav-section-label">Learner</div>
+            <a class="@NavClass("/learner/dashboard")" href="/learner/dashboard">
+                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
+            </a>
+            <a class="@NavClass("/learner/marks")" href="/learner/marks">
+                <i class="fas fa-chart-pie"></i> <span>Marks</span>
+            </a>
+            <a class="@NavClass("/learner/attendance")" href="/learner/attendance">
+                <i class="fas fa-calendar-check"></i> <span>Attendance</span>
+            </a>
+        </Authorized>
+    </AuthorizeView>
+</nav>
 
 @code {
-    private string? currentUrl;
+    private string currentPath = "";
+
     protected override void OnInitialized()
     {
-        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        currentPath = "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?')[0].TrimEnd('/');
         NavigationManager.LocationChanged += OnLocationChanged;
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
-        currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
+        currentPath = "/" + NavigationManager.ToBaseRelativePath(e.Location).Split('?')[0].TrimEnd('/');
         StateHasChanged();
+    }
+
+    private string NavClass(string href)
+    {
+        var normalizedHref = href.TrimEnd('/');
+        return currentPath.Equals(normalizedHref, StringComparison.OrdinalIgnoreCase)
+            ? "nav-item active"
+            : "nav-item";
     }
 
     public void Dispose()
     {
         NavigationManager.LocationChanged -= OnLocationChanged;
     }
-
 }

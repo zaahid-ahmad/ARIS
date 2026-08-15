@@ -51,6 +51,7 @@ builder.Services.AddIdentityCore<User>(options =>
 .AddRoles<IdentityRole>()
 .AddEntityFrameworkStores<AppDbContext>()
 .AddSignInManager()
+.AddClaimsPrincipalFactory<ARIS1.Services.AppUserClaimsPrincipalFactory>()
 .AddDefaultTokenProviders();
 
 builder.Services.AddAuthentication(options =>

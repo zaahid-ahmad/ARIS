@@ -14,7 +14,6 @@
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
-<h2>User Management</h2>
 <button class="btn btn-primary mb-3" @onclick='() => Navigation.NavigateTo("admin/users/create")'>+ Add New User</button>
 
 @if (!string.IsNullOrEmpty(errorMessage))
