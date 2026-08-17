@@ -14,7 +14,7 @@ namespace ARIS1.Services
             _httpClient = httpClient;
             _apiKey = configuration["Gemini:ApiKey"]
                 ?? throw new InvalidOperationException("Gemini:ApiKey is not configured.");
-            _model = configuration["Gemini:Model"] ?? "gemini-2.0-flash";
+            _model = configuration["Gemini:Model"] ?? "gemini-flash-latest";
         }
 
         public async Task<string> GetResponseAsync(string userInput, IReadOnlyList<ChatConcern> concerns)
