@@ -141,6 +141,15 @@
                 var safeReturnUrl = !string.IsNullOrEmpty(ReturnUrl) && await IsReturnUrlAllowedAsync(user, ReturnUrl);
                 RedirectManager.RedirectTo(safeReturnUrl ? ReturnUrl! : "/");
             }
+            else if (result.RequiresTwoFactor)
+            {
+                var safeReturnUrl = !string.IsNullOrEmpty(ReturnUrl) && await IsReturnUrlAllowedAsync(user, ReturnUrl);
+                RedirectManager.RedirectTo("Account/LoginWith2fa", new Dictionary<string, object?>
+                {
+                    ["ReturnUrl"] = safeReturnUrl ? ReturnUrl : "/",
+                    ["RememberMe"] = false
+                });
+            }
             else
             {
                 errorMessage = "Error: Invalid email, password, or school code.";

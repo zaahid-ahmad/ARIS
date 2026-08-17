@@ -52,7 +52,7 @@
                             </div>
                             <div class="profile-panel-body">
                                 <a class="profile-panel-btn" href="@ProfileHref(context.User)">
-                                    <i class="fas fa-user-edit"></i> Edit Profile
+                                    <i class="fas fa-user-edit"></i> @ProfileLabel(context.User)
                                 </a>
                                 <a class="profile-panel-btn" href="/Account/Manage/ChangePassword">
                                     <i class="fas fa-key"></i> Change Password
@@ -179,6 +179,12 @@
     {
         "Learner" => "/learner/profile",
         _ => "/Account/Manage"
+    };
+
+    private string ProfileLabel(System.Security.Claims.ClaimsPrincipal user) => RoleOf(user) switch
+    {
+        "Learner" => "View Profile",
+        _ => "Edit Profile"
     };
 
     private string GetPageTitle()
