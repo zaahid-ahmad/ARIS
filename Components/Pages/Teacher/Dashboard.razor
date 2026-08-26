@@ -2,12 +2,17 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Identity
 @using ARIS1.Models
+@using ARIS1.Data
+@using ARIS1.Services
 @using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = "Teacher")]
 @rendermode InteractiveServer
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
+@inject AppDbContext DbContext
+@inject RiskAssessmentService RiskAssessment
 
 <p>Welcome, @currentUser?.Fullname</p>
 
@@ -58,10 +63,74 @@
     </div>
 </div>
 
+<hr />
+<h4>At-Risk Alerts</h4>
+
+@if (isLoadingAlerts)
+{
+    <p>Checking learners...</p>
+}
+else if (atRiskAlerts.Count == 0)
+{
+    <div class="alert alert-success">No at-risk learners across your subjects. Great job!</div>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Learner</th>
+                <th>Subject</th>
+                <th>Risk Level</th>
+                <th>Risk Score</th>
+                <th>Attendance %</th>
+                <th>Current Average</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var alert in PagedAlerts)
+            {
+                var badgeClass = alert.Risk.Level == "Critical" ? "danger" : "warning";
+                <tr>
+                    <td>@alert.Learner.User?.Fullname</td>
+                    <td>@alert.Subject.Name</td>
+                    <td><span class="badge bg-@badgeClass">@alert.Risk.Level</span></td>
+                    <td>@alert.Risk.Score.ToString("F1")</td>
+                    <td>@alert.Risk.AttendancePercentage.ToString("F1")%</td>
+                    <td>@alert.Risk.AcademicAverage.ToString("F1")%</td>
+                    <td>
+                        <button class="btn btn-primary btn-sm"
+                                @onclick="() => ViewLearnerProfile(alert.Learner)">
+                            View Profile
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
+}
+
 @code {
     private User? currentUser;
     private int? currentSchoolId;
     private string errorMessage = string.Empty;
+    private bool isLoadingAlerts = true;
+    private List<AtRiskAlert> atRiskAlerts = new();
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling(atRiskAlerts.Count / (double)PageSize);
+    private List<AtRiskAlert> PagedAlerts => atRiskAlerts.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
+
+    private class AtRiskAlert
+    {
+        public Learner Learner { get; set; } = null!;
+        public Subject Subject { get; set; } = null!;
+        public RiskData Risk { get; set; } = null!;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -69,7 +138,7 @@
         {
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             var user = authState.User;
-            
+
             if (user.Identity?.IsAuthenticated == true)
             {
                 currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
@@ -78,13 +147,65 @@
                 if (currentSchoolId == null)
                 {
                     errorMessage = "You are not assigned to a school.";
+                    return;
                 }
+
+                await LoadAtRiskAlerts();
             }
         }
         catch (Exception ex)
         {
             errorMessage = $"Error: {ex.Message}";
         }
+        finally
+        {
+            isLoadingAlerts = false;
+        }
+    }
+
+    private async Task LoadAtRiskAlerts()
+    {
+        var teacher = await DbContext.Teachers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.UserId == currentUser!.Id);
+
+        if (teacher == null) return;
+
+        var subjects = await DbContext.Subjects
+            .AsNoTracking()
+            .Where(s => s.TeacherId == teacher.TeacherId && s.SchoolId == currentSchoolId)
+            .ToListAsync();
+
+        var alerts = new List<AtRiskAlert>();
+
+        foreach (var subject in subjects)
+        {
+            var learners = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.SubjectId == subject.SubjectId)
+                .Include(ls => ls.Learner)
+                .ThenInclude(l => l.User)
+                .Select(ls => ls.Learner)
+                .ToListAsync();
+
+            foreach (var learner in learners)
+            {
+                var risk = await RiskAssessment.CalculateRiskScore(learner.LearnerId, subject.SubjectId);
+                if (risk.Score >= RiskAssessmentService.AtRiskThreshold)
+                {
+                    alerts.Add(new AtRiskAlert { Learner = learner, Subject = subject, Risk = risk });
+                }
+            }
+        }
+
+        atRiskAlerts = alerts
+            .OrderByDescending(a => a.Risk.Score)
+            .ToList();
+    }
+
+    private void ViewLearnerProfile(Learner learner)
+    {
+        Navigation.NavigateTo($"/teacher/learnerprofiles?learner={learner.LearnerId}");
     }
 
     private void Logout()

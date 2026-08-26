@@ -13,8 +13,12 @@
 @inject NavigationManager Navigation
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject BulkUserImportService BulkImportService
 
-<button class="btn btn-primary mb-3" @onclick='() => Navigation.NavigateTo("admin/users/create")'>+ Add New User</button>
+<div class="d-flex gap-2 mb-3">
+    <button class="btn btn-primary" @onclick='() => Navigation.NavigateTo("admin/users/create")'>+ Add New User</button>
+    <button class="btn btn-outline-primary" @onclick="ShowImportModal">Bulk Import</button>
+</div>
 
 @if (!string.IsNullOrEmpty(errorMessage))
 {
@@ -137,13 +141,23 @@ else
                     }
                     <div class="mb-3">
                         <label class="form-label">New Password <span class="text-danger">*</span></label>
-                        <input type="password" class="form-control @(passwordResetError != null ? "is-invalid" : "")"
-                               @bind="newPassword" @oninput="@(() => passwordResetError = null)"
-                               autocomplete="new-password" />
+                        <div class="d-flex gap-2">
+                            <input type="@(revealNewPassword ? "text" : "password")"
+                                   class="form-control @(passwordResetError != null ? "is-invalid" : "")"
+                                   @bind="newPassword" @oninput="@(() => passwordResetError = null)"
+                                   autocomplete="new-password" />
+                            <button type="button" class="btn btn-outline-secondary" @onclick="GenerateResetPassword">
+                                Generate
+                            </button>
+                        </div>
                         @if (passwordResetError != null)
                         {
-                            <div class="invalid-feedback">@passwordResetError</div>
+                            <div class="invalid-feedback d-block">@passwordResetError</div>
                         }
+                        <div class="form-check mt-1">
+                            <input type="checkbox" class="form-check-input" id="revealNewPassword" @bind="revealNewPassword" />
+                            <label class="form-check-label" for="revealNewPassword">Show password</label>
+                        </div>
                         <small class="text-muted">Minimum 8 characters, must include at least one digit.</small>
                     </div>
                     <small class="text-muted">Username/Email: @userToResetEmail</small>
@@ -188,6 +202,104 @@ else
     </div>
 }
 
+<!-- BULK IMPORT MODAL -->
+@if (showImportModal)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Bulk Import Users</h5>
+                    <button type="button" class="btn-close" @onclick="CloseImportModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Upload a CSV or Excel (.xlsx) file with columns: <code>FullName, Email, Role, Grade, ClassName, Password</code>.</p>
+                    <ul class="small text-muted">
+                        <li><strong>Role</strong> must be <code>Teacher</code> or <code>Learner</code>.</li>
+                        <li><strong>Grade</strong> and <strong>ClassName</strong> apply to learners only (e.g. Grade 10, Class 10A).</li>
+                        <li><strong>Password</strong> is optional — leave blank to auto-generate one (shown in the results below).</li>
+                    </ul>
+                    <a class="btn btn-link p-0 mb-3" href="/templates/bulk-user-import-template.csv" download>
+                        Download CSV template
+                    </a>
+
+                    <InputFile OnChange="HandleFileSelected" accept=".csv,.xlsx,.xls" class="form-control" disabled="@isImporting" />
+
+                    @if (!string.IsNullOrEmpty(importError))
+                    {
+                        <div class="alert alert-danger mt-3">@importError</div>
+                    }
+
+                    @if (isImporting)
+                    {
+                        <p class="mt-3"><em>Importing...</em></p>
+                    }
+
+                    @if (importResults != null)
+                    {
+                        <hr />
+                        <h6>
+                            Results: @importResults.Count(r => r.Success) succeeded,
+                            @importResults.Count(r => !r.Success) failed
+                        </h6>
+                        @if (credentialsDownloadUrl != null)
+                        {
+                            <div class="alert alert-warning py-2">
+                                Generated passwords are shown only once and cannot be recovered later.
+                                <a class="btn btn-warning btn-sm ms-2" href="@credentialsDownloadUrl" download="import-credentials.csv">
+                                    Download credentials (CSV)
+                                </a>
+                            </div>
+                        }
+                        <div class="table-responsive" style="max-height: 320px; overflow-y: auto;">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Row</th>
+                                        <th>Name</th>
+                                        <th>Email</th>
+                                        <th>Role</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var result in importResults)
+                                    {
+                                        <tr>
+                                            <td>@result.RowNumber</td>
+                                            <td>@result.FullName</td>
+                                            <td>@result.Email</td>
+                                            <td>@result.Role</td>
+                                            <td>
+                                                @if (result.Success)
+                                                {
+                                                    <span class="badge bg-success">Created</span>
+                                                    @if (result.GeneratedPassword != null)
+                                                    {
+                                                        <div><small>Password: <code>@result.GeneratedPassword</code></small></div>
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-danger">Failed</span>
+                                                    <div><small class="text-danger">@result.ErrorMessage</small></div>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseImportModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<User>? users;
     private Dictionary<string, string> userRoles = new();
@@ -202,6 +314,7 @@ else
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private string? passwordResetError;
+    private bool revealNewPassword = false;
     private int? currentSchoolId;
     private string? currentUserId;
     private int? learnerToEditId;
@@ -209,6 +322,12 @@ else
     private int learnerToEditGrade;
     private string editClassName = string.Empty;
     private string? classNameEditError;
+
+    private bool showImportModal = false;
+    private bool isImporting = false;
+    private string? importError;
+    private List<ImportRowResult>? importResults;
+    private string? credentialsDownloadUrl;
 
     private IEnumerable<User> FilteredUsers => users?
         .Where(u => string.IsNullOrWhiteSpace(searchTerm) ||
@@ -352,6 +471,14 @@ else
         newPassword = string.Empty;
         resetMessage = string.Empty;
         passwordResetError = null;
+        revealNewPassword = false;
+    }
+
+    private void GenerateResetPassword()
+    {
+        newPassword = PasswordGenerator.Generate();
+        revealNewPassword = true;
+        passwordResetError = null;
     }
 
     private async Task ConfirmResetPassword()
@@ -400,6 +527,7 @@ else
         resetMessage = string.Empty;
         newPassword = string.Empty;
         passwordResetError = null;
+        revealNewPassword = false;
     }
 
     private void ShowEditClass(int learnerId, string fullname, int grade, string currentClassName)
@@ -469,5 +597,97 @@ else
         searchTerm = string.Empty;
         currentPage = 1;
         StateHasChanged();
+    }
+
+    private void ShowImportModal()
+    {
+        showImportModal = true;
+        importError = null;
+        importResults = null;
+        credentialsDownloadUrl = null;
+    }
+
+    private void CloseImportModal()
+    {
+        showImportModal = false;
+        importError = null;
+        importResults = null;
+        credentialsDownloadUrl = null;
+        isImporting = false;
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        importError = null;
+        importResults = null;
+        credentialsDownloadUrl = null;
+
+        if (currentSchoolId == null)
+        {
+            importError = "You are not assigned to a school.";
+            return;
+        }
+
+        var file = e.File;
+        var extension = Path.GetExtension(file.Name);
+
+        if (extension is not (".csv" or ".xlsx" or ".xls"))
+        {
+            importError = "Unsupported file type. Please upload a .csv or .xlsx file.";
+            return;
+        }
+
+        isImporting = true;
+        StateHasChanged();
+
+        try
+        {
+            const long maxFileSize = 5 * 1024 * 1024; // 5 MB
+            using var memoryStream = new MemoryStream();
+            await using (var stream = file.OpenReadStream(maxFileSize))
+            {
+                await stream.CopyToAsync(memoryStream);
+            }
+            memoryStream.Position = 0;
+
+            var rows = BulkImportService.ParseFile(memoryStream, extension);
+            if (rows.Count == 0)
+            {
+                importError = "No data rows found in the file.";
+                return;
+            }
+
+            importResults = await BulkImportService.ImportAsync(rows, currentSchoolId.Value);
+            successMessage = $"Import complete: {importResults.Count(r => r.Success)} of {importResults.Count} user(s) created.";
+            credentialsDownloadUrl = BuildCredentialsDownloadUrl(importResults);
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            importError = $"Error processing file: {ex.Message}";
+        }
+        finally
+        {
+            isImporting = false;
+        }
+    }
+
+    private static string? BuildCredentialsDownloadUrl(List<ImportRowResult> results)
+    {
+        var withPasswords = results.Where(r => r.Success && r.GeneratedPassword != null).ToList();
+        if (withPasswords.Count == 0) return null;
+
+        var lines = new List<string> { "FullName,Email,Role,Password" };
+        lines.AddRange(withPasswords.Select(r =>
+            string.Join(",", CsvField(r.FullName), CsvField(r.Email), CsvField(r.Role), CsvField(r.GeneratedPassword!))));
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines));
+        return $"data:text/csv;base64,{Convert.ToBase64String(bytes)}";
+    }
+
+    private static string CsvField(string value)
+    {
+        if (value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) < 0) return value;
+        return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 }

@@ -18,6 +18,8 @@ builder.Services.AddScoped<InterventionService>();
 
 builder.Services.AddScoped<WeightCalculationService>();
 builder.Services.AddScoped<SchoolAuthorizationService>();
+builder.Services.AddScoped<RiskAssessmentService>();
+builder.Services.AddScoped<BulkUserImportService>();
 
 // Support.razor depends only on IChatAssistantService — falls back to the free
 // rule-based bot when no Gemini API key is configured (set via user-secrets:
@@ -66,6 +68,12 @@ builder.Services.AddAuthorization();
 // Add Razor components
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+// Default SignalR message size (32KB) is too small for bulk-import CSV/Excel uploads via InputFile
+builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+{
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10 MB
+});
 
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();

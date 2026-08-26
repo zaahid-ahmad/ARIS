@@ -5,12 +5,14 @@
 @using ARIS1.Data
 @using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
+@using ARIS1.Services
 @attribute [Authorize(Roles = "Teacher")]
 @rendermode InteractiveServer
 @inject AppDbContext DbContext
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
+@inject RiskAssessmentService RiskAssessment
 
 @if (!string.IsNullOrEmpty(errorMessage))
 {
@@ -105,15 +107,6 @@ else
     private List<Learner> PagedAtRisk => atRiskLearners.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
     private void GoToPage(int page) => currentPage = page;
 
-    private class RiskData
-    {
-        public string Level { get; set; } = string.Empty;
-        public decimal Score { get; set; }
-        public decimal AttendancePercentage { get; set; }
-        public decimal AcademicAverage { get; set; }
-        public string Intervention { get; set; } = string.Empty;
-    }
-
     private void ViewLearnerProfile(Learner learner)
     {
         Navigation.NavigateTo($"/teacher/learnerprofiles?learner={learner.LearnerId}");
@@ -184,13 +177,13 @@ else
             // Pre-calculate all risk data
             foreach (var learner in atRiskLearners)
             {
-                var riskData = await CalculateRiskScore(learner);
+                var riskData = await RiskAssessment.CalculateRiskScore(learner.LearnerId, selectedSubjectId);
                 learnerRiskCache[learner.LearnerId] = riskData;
             }
 
             // Filter to only at-risk learners
             atRiskLearners = atRiskLearners
-                .Where(l => learnerRiskCache[l.LearnerId].Score >= 45)
+                .Where(l => learnerRiskCache[l.LearnerId].Score >= RiskAssessmentService.AtRiskThreshold)
                 .ToList();
 
             hasLoaded = true;
@@ -200,75 +193,5 @@ else
         {
             errorMessage = $"Error loading at-risk learners: {ex.Message}";
         }
-    }
-
-    private async Task<RiskData> CalculateRiskScore(Learner learner)
-    {
-        var riskData = new RiskData();
-
-        // Calculate attendance percentage
-        var attendanceRecords = await DbContext.AttendanceRecords
-            .AsNoTracking()
-            .Where(ar => ar.LearnerId == learner.LearnerId)
-            .ToListAsync();
-
-        int presentCount = attendanceRecords.Count(ar => ar.Status == "Present");
-        riskData.AttendancePercentage = attendanceRecords.Count > 0
-            ? (presentCount * 100m) / attendanceRecords.Count
-            : 100m;
-
-        // Calculate academic average
-        var marks = await DbContext.LearnerMarks
-            .AsNoTracking()
-            .Where(m => m.Assessment.SubjectId == selectedSubjectId && m.LearnerId == learner.LearnerId && !m.IsAbsent)
-            .Include(m => m.Assessment)
-            .ToListAsync();
-
-        if (marks.Count == 0)
-        {
-            riskData.AcademicAverage = 0;
-        }
-        else
-        {
-            decimal totalPercentage = 0m;
-            foreach (var mark in marks)
-            {
-                decimal percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100m;
-                totalPercentage += percentage;
-            }
-            riskData.AcademicAverage = totalPercentage / marks.Count;
-        }
-
-        // Calculate composite risk score
-        // 60% academics + 30% attendance + 10% trend (simplified to 0 for now)
-        decimal academicFactor = 60m * (riskData.AcademicAverage / 100m);
-        decimal attendanceFactor = 30m * (riskData.AttendancePercentage / 100m);
-        decimal trendFactor = 10m * 0.5m;
-
-        riskData.Score = 100 - (academicFactor + attendanceFactor + trendFactor);
-
-        // Determine risk level and intervention
-        if (riskData.Score >= 55)
-        {
-            riskData.Level = "Critical";
-            riskData.Intervention = "Urgent: Parent meeting required, intensive intervention needed";
-        }
-        else if (riskData.Score >= 45)
-        {
-            riskData.Level = "High";
-            riskData.Intervention = "Schedule tutoring sessions, monitor progress closely";
-        }
-        else if (riskData.Score >= 30)
-        {
-            riskData.Level = "Moderate";
-            riskData.Intervention = "Provide extra support, encourage participation";
-        }
-        else
-        {
-            riskData.Level = "Low";
-            riskData.Intervention = "Continue regular monitoring";
-        }
-
-        return riskData;
     }
 }
