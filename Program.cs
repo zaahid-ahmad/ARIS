@@ -20,6 +20,7 @@ builder.Services.AddScoped<WeightCalculationService>();
 builder.Services.AddScoped<SchoolAuthorizationService>();
 builder.Services.AddScoped<RiskAssessmentService>();
 builder.Services.AddScoped<BulkUserImportService>();
+builder.Services.AddScoped<BulkSubjectAllocationService>();
 
 // Support.razor depends only on IChatAssistantService — falls back to the free
 // rule-based bot when no Gemini API key is configured (set via user-secrets:

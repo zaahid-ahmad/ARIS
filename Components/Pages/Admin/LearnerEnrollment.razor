@@ -12,6 +12,10 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager Navigation
 
+<button class="btn btn-outline-primary mb-3" @onclick='() => Navigation.NavigateTo("/admin/bulk-enrollment")'>
+    Bulk Allocate by Class
+</button>
+
 @if (!string.IsNullOrEmpty(errorMessage))
 {
     <div class="alert alert-danger">@errorMessage</div>

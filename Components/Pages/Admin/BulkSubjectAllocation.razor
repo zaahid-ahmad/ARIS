@@ -1,0 +1,296 @@
+@page "/admin/bulk-enrollment"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Services
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject BulkSubjectAllocationService AllocationService
+@inject NavigationManager Navigation
+
+<button class="btn btn-secondary mb-3" @onclick='() => Navigation.NavigateTo("/admin/enrollment")'>
+    Back to Enrollment
+</button>
+
+<h4>Bulk Subject Allocation by Class</h4>
+<p class="text-muted">Enroll every learner in a class into one or more subjects at once.</p>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (result != null)
+{
+    <div class="alert alert-success">
+        Done — <strong>@result.EnrollmentsCreated</strong> new enrollment(s) created for academic year @confirmedAcademicYear.
+        @if (result.PairsSkipped > 0)
+        {
+            <text><strong>@result.PairsSkipped</strong> learner-subject pair(s) were already enrolled and left unchanged.</text>
+        }
+    </div>
+    <button class="btn btn-primary" @onclick="ResetForm">Allocate Another Class</button>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-header"><h5>1. Select Grade, Class and Subjects</h5></div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="mb-3">
+                        <label class="form-label">Grade</label>
+                        <select class="form-control" @bind="selectedGrade" @bind:after="OnGradeChanged" disabled="@(preview != null)">
+                            <option value="0">-- Select Grade --</option>
+                            <option value="10">Grade 10</option>
+                            <option value="11">Grade 11</option>
+                            <option value="12">Grade 12</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="mb-3">
+                        <label class="form-label">Class</label>
+                        <select class="form-control" @bind="selectedClassName" @bind:after="OnClassChanged"
+                                disabled="@(selectedGrade == 0 || preview != null)">
+                            <option value="">-- Select Class --</option>
+                            @foreach (var className in classOptions)
+                            {
+                                <option value="@className">@className</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="mb-3">
+                        <label class="form-label">Academic Year</label>
+                        <input type="number" class="form-control" @bind="academicYear" disabled="@(preview != null)" />
+                        <small class="text-muted">Applied only to newly created enrollments.</small>
+                    </div>
+                </div>
+            </div>
+
+            @if (selectedGrade > 0)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Subjects (Grade @selectedGrade)</label>
+                    @if (gradeSubjects.Count == 0)
+                    {
+                        <p class="text-muted">No subjects exist for this grade yet.</p>
+                    }
+                    else
+                    {
+                        <div class="row">
+                            @foreach (var subject in gradeSubjects)
+                            {
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="@("subject-" + subject.SubjectId)"
+                                               checked="@selectedSubjectIds.Contains(subject.SubjectId)"
+                                               disabled="@(preview != null)"
+                                               @onchange="@((e) => ToggleSubject(subject.SubjectId, (bool)e.Value!))" />
+                                        <label class="form-check-label" for="@("subject-" + subject.SubjectId)">
+                                            @subject.Name
+                                        </label>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (preview == null)
+            {
+                <button class="btn btn-primary"
+                        @onclick="LoadPreview"
+                        disabled="@(selectedGrade == 0 || string.IsNullOrEmpty(selectedClassName) || selectedSubjectIds.Count == 0)">
+                    Preview Allocation
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (preview != null)
+    {
+        <div class="card mb-4 border-warning">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0">2. Review Before Committing</h5>
+            </div>
+            <div class="card-body">
+                <p>
+                    This will enroll <strong>@preview.LearnerNames.Count learner(s)</strong> in class
+                    <strong>@preview.ClassName</strong> (Grade @preview.Grade) into
+                    <strong>@preview.SubjectNames.Count subject(s)</strong>: @string.Join(", ", preview.SubjectNames).
+                </p>
+                <ul>
+                    <li><strong>@preview.NewEnrollmentCount</strong> new enrollment(s) will be created for academic year <strong>@preview.AcademicYear</strong>.</li>
+                    @if (preview.AlreadyEnrolledPairCount > 0)
+                    {
+                        <li>
+                            <strong>@preview.AlreadyEnrolledPairCount</strong> learner-subject pair(s) are already enrolled
+                            (under their existing academic year) and will be <strong>skipped</strong> — not overwritten.
+                        </li>
+                    }
+                </ul>
+
+                @if (preview.NewEnrollmentCount == 0)
+                {
+                    <div class="alert alert-info mb-0">Everyone in this class is already enrolled in all selected subjects. Nothing to do.</div>
+                }
+                else
+                {
+                    <details class="mb-3">
+                        <summary class="text-muted">View affected learners (@preview.LearnerNames.Count)</summary>
+                        <ul class="mt-2">
+                            @foreach (var name in preview.LearnerNames)
+                            {
+                                <li>@name</li>
+                            }
+                        </ul>
+                    </details>
+                }
+
+                <button class="btn btn-secondary me-2" @onclick="CancelPreview">Cancel</button>
+                <button class="btn btn-warning" @onclick="ConfirmAllocation" disabled="@(preview.NewEnrollmentCount == 0 || isSaving)">
+                    @(isSaving ? "Enrolling..." : $"Confirm — Enroll {preview.NewEnrollmentCount} Pair(s)")
+                </button>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private int selectedGrade = 0;
+    private string selectedClassName = string.Empty;
+    private int academicYear = DateTime.Now.Year;
+    private List<string> classOptions = new();
+    private List<Subject> gradeSubjects = new();
+    private HashSet<int> selectedSubjectIds = new();
+    private ClassAllocationPreview? preview;
+    private ClassAllocationResult? result;
+    private int confirmedAcademicYear;
+    private bool isSaving = false;
+    private string errorMessage = string.Empty;
+    private int? currentSchoolId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+
+        if (string.IsNullOrEmpty(userName))
+        {
+            errorMessage = "You must be logged in.";
+            return;
+        }
+
+        var currentUser = await UserManager.FindByNameAsync(userName);
+        currentSchoolId = currentUser?.SchoolId;
+
+        if (currentSchoolId == null)
+        {
+            errorMessage = "You are not assigned to a school.";
+        }
+    }
+
+    private async Task OnGradeChanged()
+    {
+        selectedClassName = string.Empty;
+        selectedSubjectIds.Clear();
+        classOptions = new();
+        gradeSubjects = new();
+        preview = null;
+        errorMessage = string.Empty;
+
+        if (selectedGrade == 0 || currentSchoolId == null) return;
+
+        try
+        {
+            classOptions = await AllocationService.GetClassNamesAsync(currentSchoolId.Value, selectedGrade);
+            gradeSubjects = await AllocationService.GetGradeSubjectsAsync(currentSchoolId.Value, selectedGrade);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading grade data: {ex.Message}";
+        }
+    }
+
+    private void OnClassChanged()
+    {
+        preview = null;
+    }
+
+    private void ToggleSubject(int subjectId, bool isChecked)
+    {
+        if (isChecked) selectedSubjectIds.Add(subjectId);
+        else selectedSubjectIds.Remove(subjectId);
+        preview = null;
+    }
+
+    private async Task LoadPreview()
+    {
+        errorMessage = string.Empty;
+        if (currentSchoolId == null || selectedGrade == 0 || string.IsNullOrEmpty(selectedClassName) || selectedSubjectIds.Count == 0)
+            return;
+
+        if (academicYear < 2020 || academicYear > DateTime.Now.Year + 1)
+        {
+            errorMessage = $"Academic year must be between 2020 and {DateTime.Now.Year + 1}.";
+            return;
+        }
+
+        try
+        {
+            preview = await AllocationService.PreviewAsync(
+                currentSchoolId.Value, selectedGrade, selectedClassName, selectedSubjectIds.ToList(), academicYear);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error building preview: {ex.Message}";
+        }
+    }
+
+    private void CancelPreview()
+    {
+        preview = null;
+    }
+
+    private async Task ConfirmAllocation()
+    {
+        if (preview == null || currentSchoolId == null) return;
+
+        isSaving = true;
+        errorMessage = string.Empty;
+        try
+        {
+            result = await AllocationService.AllocateAsync(
+                currentSchoolId.Value, selectedGrade, selectedClassName, selectedSubjectIds.ToList(), academicYear);
+            confirmedAcademicYear = academicYear;
+            preview = null;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error allocating subjects: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void ResetForm()
+    {
+        selectedGrade = 0;
+        selectedClassName = string.Empty;
+        academicYear = DateTime.Now.Year;
+        classOptions = new();
+        gradeSubjects = new();
+        selectedSubjectIds.Clear();
+        preview = null;
+        result = null;
+        errorMessage = string.Empty;
+    }
+}
