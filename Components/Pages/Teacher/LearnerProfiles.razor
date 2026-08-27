@@ -247,6 +247,7 @@ else
     private List<Subject> learnerSubjects = new();
     private List<Intervention> learnerInterventions = new();
     private Learner? selectedLearner;
+    private bool isLoadingProfile = false;
     private string searchTerm = string.Empty;
     private string errorMessage = string.Empty;
     private Teacher? currentTeacher;
@@ -394,18 +395,25 @@ else
 
     private async Task ViewProfile(Learner learner)
     {
+        // Guard against overlapping runs (e.g. clicking a second "View Profile" before the
+        // first finishes loading) — without this, two concurrent calls interleave their
+        // awaits and clobber the shared learnerSubjects/learnerInterventions/assessmentMarksCache
+        // fields mid-flight, the same failure mode fixed in Teacher/AtRisk.razor.
+        if (isLoadingProfile) return;
+
+        isLoadingProfile = true;
+        selectedLearner = learner;
+
         try
         {
-            selectedLearner = learner;
-
-            learnerSubjects = await DbContext.LearnerSubjects
+            var subjects = await DbContext.LearnerSubjects
                 .AsNoTracking()
                 .Where(ls => ls.LearnerId == learner.LearnerId)
                 .Include(ls => ls.Subject)
                 .Select(ls => ls.Subject)
                 .ToListAsync();
 
-            learnerInterventions = await DbContext.Interventions
+            var interventions = await DbContext.Interventions
                 .AsNoTracking()
                 .Where(i => i.LearnerId == learner.LearnerId)
                 .Include(i => i.Question)
@@ -415,9 +423,11 @@ else
                 .ThenBy(i => i.Level)
                 .ToListAsync();
 
-            // Load marks for each subject
-            assessmentMarksCache.Clear();
-            foreach (var subject in learnerSubjects)
+            // Build into a local variable first — the shared fields are only ever updated
+            // together, in one shot, so a render can never see one field reflect this
+            // learner while another still reflects a previous or concurrent one.
+            var marksCache = new Dictionary<int, List<AssessmentMarkInfo>>();
+            foreach (var subject in subjects)
             {
                 var marks = await DbContext.LearnerMarks
                     .AsNoTracking()
@@ -434,12 +444,20 @@ else
                     })
                     .ToListAsync();
 
-                assessmentMarksCache[subject.SubjectId] = marks;
+                marksCache[subject.SubjectId] = marks;
             }
+
+            learnerSubjects = subjects;
+            learnerInterventions = interventions;
+            assessmentMarksCache = marksCache;
         }
         catch (Exception ex)
         {
             errorMessage = $"Error loading profile: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingProfile = false;
         }
     }
 }

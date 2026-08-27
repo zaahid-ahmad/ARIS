@@ -64,52 +64,26 @@
 </div>
 
 <hr />
-<h4>At-Risk Alerts</h4>
 
 @if (isLoadingAlerts)
 {
     <p>Checking learners...</p>
 }
-else if (atRiskAlerts.Count == 0)
+else if (atRiskLearnerCount == 0)
 {
     <div class="alert alert-success">No at-risk learners across your subjects. Great job!</div>
 }
 else
 {
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Learner</th>
-                <th>Subject</th>
-                <th>Risk Level</th>
-                <th>Risk Score</th>
-                <th>Attendance %</th>
-                <th>Current Average</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var alert in PagedAlerts)
-            {
-                var badgeClass = alert.Risk.Level == "Critical" ? "danger" : "warning";
-                <tr>
-                    <td>@alert.Learner.User?.Fullname</td>
-                    <td>@alert.Subject.Name</td>
-                    <td><span class="badge bg-@badgeClass">@alert.Risk.Level</span></td>
-                    <td>@alert.Risk.Score.ToString("F1")</td>
-                    <td>@alert.Risk.AttendancePercentage.ToString("F1")%</td>
-                    <td>@alert.Risk.AcademicAverage.ToString("F1")%</td>
-                    <td>
-                        <button class="btn btn-primary btn-sm"
-                                @onclick="() => ViewLearnerProfile(alert.Learner)">
-                            View Profile
-                        </button>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
+    <div class="alert alert-danger d-flex justify-content-between align-items-center"
+         style="cursor: pointer;"
+         @onclick='() => Navigation.NavigateTo("/teacher/atrisk")'>
+        <span>
+            <strong>⚠ You have @atRiskLearnerCount at-risk learner@(atRiskLearnerCount == 1 ? "" : "s")</strong>
+            across your subjects.
+        </span>
+        <span class="badge bg-light text-danger">View At-Risk Learners →</span>
+    </div>
 }
 
 @code {
@@ -117,20 +91,7 @@ else
     private int? currentSchoolId;
     private string errorMessage = string.Empty;
     private bool isLoadingAlerts = true;
-    private List<AtRiskAlert> atRiskAlerts = new();
-
-    private int currentPage = 1;
-    private const int PageSize = 15;
-    private int totalPages => (int)Math.Ceiling(atRiskAlerts.Count / (double)PageSize);
-    private List<AtRiskAlert> PagedAlerts => atRiskAlerts.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
-    private void GoToPage(int page) => currentPage = page;
-
-    private class AtRiskAlert
-    {
-        public Learner Learner { get; set; } = null!;
-        public Subject Subject { get; set; } = null!;
-        public RiskData Risk { get; set; } = null!;
-    }
+    private int atRiskLearnerCount = 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -176,36 +137,27 @@ else
             .Where(s => s.TeacherId == teacher.TeacherId && s.SchoolId == currentSchoolId)
             .ToListAsync();
 
-        var alerts = new List<AtRiskAlert>();
+        var atRiskLearnerIds = new HashSet<int>();
 
         foreach (var subject in subjects)
         {
-            var learners = await DbContext.LearnerSubjects
+            var learnerIds = await DbContext.LearnerSubjects
                 .AsNoTracking()
                 .Where(ls => ls.SubjectId == subject.SubjectId)
-                .Include(ls => ls.Learner)
-                .ThenInclude(l => l.User)
-                .Select(ls => ls.Learner)
+                .Select(ls => ls.LearnerId)
                 .ToListAsync();
 
-            foreach (var learner in learners)
+            foreach (var learnerId in learnerIds)
             {
-                var risk = await RiskAssessment.CalculateRiskScore(learner.LearnerId, subject.SubjectId);
+                var risk = await RiskAssessment.CalculateRiskScore(learnerId, subject.SubjectId);
                 if (risk.Score >= RiskAssessmentService.AtRiskThreshold)
                 {
-                    alerts.Add(new AtRiskAlert { Learner = learner, Subject = subject, Risk = risk });
+                    atRiskLearnerIds.Add(learnerId);
                 }
             }
         }
 
-        atRiskAlerts = alerts
-            .OrderByDescending(a => a.Risk.Score)
-            .ToList();
-    }
-
-    private void ViewLearnerProfile(Learner learner)
-    {
-        Navigation.NavigateTo($"/teacher/learnerprofiles?learner={learner.LearnerId}");
+        atRiskLearnerCount = atRiskLearnerIds.Count;
     }
 
     private void Logout()

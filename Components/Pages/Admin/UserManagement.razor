@@ -618,6 +618,12 @@ else
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
+        // Guard against overlapping runs — without this, two concurrent calls could use
+        // the same scoped DbContext for simultaneous async operations (EF Core's DbContext
+        // is not thread-safe for concurrent use) and clobber importResults/successMessage,
+        // the same class of bug fixed in AtRisk.razor and LearnerProfiles.razor.
+        if (isImporting) return;
+
         importError = null;
         importResults = null;
         credentialsDownloadUrl = null;

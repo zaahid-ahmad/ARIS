@@ -37,9 +37,116 @@ else
                     </option>
                 }
             </select>
-            <button class="btn btn-primary mt-2" @onclick="LoadAtRiskLearners">Load Learners</button>
+            <button class="btn btn-primary mt-2" @onclick="LoadAtRiskLearners" disabled="@isLoadingRisk">
+                @(isLoadingRisk ? "Loading..." : "Load Learners")
+            </button>
         </div>
     </div>
+
+    @if (hasLoaded && allLearnersInSubject.Count > 0)
+    {
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Risk Overview — Attendance vs Academic Average</h5></div>
+            <div class="card-body">
+                <div style="position: relative; max-width: 640px;">
+                    <svg viewBox="0 0 620 420" style="width: 100%; height: auto; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">
+                        @foreach (var tick in ChartTicks)
+                        {
+                            var gx = ChartX(tick);
+                            var gy = ChartY(tick);
+                            <line x1="@gx" y1="@ChartTop" x2="@gx" y2="@(ChartTop + PlotHeight)" stroke="#e1e0d9" stroke-width="1" />
+                            <line x1="@ChartLeft" y1="@gy" x2="@(ChartLeft + PlotWidth)" y2="@gy" stroke="#e1e0d9" stroke-width="1" />
+                            @TickLabelX(tick)
+                            @TickLabelY(tick)
+                        }
+
+                        <line x1="@ChartLeft" y1="@ChartTop" x2="@ChartLeft" y2="@(ChartTop + PlotHeight)" stroke="#c3c2b7" stroke-width="1" />
+                        <line x1="@ChartLeft" y1="@(ChartTop + PlotHeight)" x2="@(ChartLeft + PlotWidth)" y2="@(ChartTop + PlotHeight)" stroke="#c3c2b7" stroke-width="1" />
+
+                        <text x="@(ChartLeft + PlotWidth / 2)" y="@(ChartHeight - 8)" font-size="12" fill="#52514e" text-anchor="middle">Attendance %</text>
+                        <text x="12" y="14" font-size="12" fill="#52514e">Academic Average %</text>
+
+                        @foreach (var learner in allLearnersInSubject)
+                        {
+                            var risk = learnerRiskCache[learner.LearnerId];
+                            var cx = ChartX(risk.AttendancePercentage);
+                            var cy = ChartY(risk.AcademicAverage);
+                            var color = StatusColor(risk.Level);
+                            var learnerId = learner.LearnerId;
+                            <circle cx="@cx" cy="@cy" r="5" fill="@color" stroke="#fcfcfb" stroke-width="2" />
+                            <circle cx="@cx" cy="@cy" r="12" fill="transparent" tabindex="0" style="cursor: pointer;"
+                                    @onmouseenter="() => hoveredLearnerId = learnerId"
+                                    @onmouseleave="() => hoveredLearnerId = null"
+                                    @onfocus="() => hoveredLearnerId = learnerId"
+                                    @onblur="() => hoveredLearnerId = null" />
+                        }
+                    </svg>
+
+                    @if (hoveredLearnerId.HasValue && learnerRiskCache.TryGetValue(hoveredLearnerId.Value, out var hoveredRisk))
+                    {
+                        var hoveredLearner = allLearnersInSubject.First(l => l.LearnerId == hoveredLearnerId.Value);
+                        var leftPct = ChartX(hoveredRisk.AttendancePercentage) / ChartWidth * 100;
+                        var topPct = ChartY(hoveredRisk.AcademicAverage) / ChartHeight * 100;
+                        <div style="position: absolute; left: @(leftPct.ToString("F1"))%; top: @(topPct.ToString("F1"))%; transform: translate(-50%, -120%);
+                                    background: #0b0b0b; color: #ffffff; padding: 8px 12px; border-radius: 6px;
+                                    font-size: 12px; white-space: nowrap; pointer-events: none; z-index: 10;">
+                            <div style="font-weight: 600; margin-bottom: 4px;">@hoveredLearner.User?.Fullname</div>
+                            <div>Academic Average: <strong>@hoveredRisk.AcademicAverage.ToString("F1")%</strong></div>
+                            <div>Attendance: <strong>@hoveredRisk.AttendancePercentage.ToString("F1")%</strong></div>
+                            <div>
+                                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:@StatusColor(hoveredRisk.Level);margin-right:4px;"></span>
+                                Risk: <strong>@hoveredRisk.Level</strong>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="d-flex gap-3 mt-3 flex-wrap">
+                    @foreach (var (level, color) in RiskLevelLegend)
+                    {
+                        <div class="d-flex align-items-center gap-1">
+                            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:@color;"></span>
+                            <small class="text-muted">@level</small>
+                        </div>
+                    }
+                </div>
+                <small class="text-muted d-block mt-2">
+                    @allLearnersInSubject.Count learner(s) in this subject. Hover (or tab to) a dot for details.
+                </small>
+
+                <details class="mt-3">
+                    <summary class="text-muted" style="cursor: pointer;">View all learners as a table</summary>
+                    <div class="table-responsive mt-2">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Learner</th>
+                                    <th>Risk Level</th>
+                                    <th>Attendance %</th>
+                                    <th>Academic Average</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var learner in allLearnersInSubject.OrderByDescending(l => learnerRiskCache[l.LearnerId].Score))
+                                {
+                                    var risk = learnerRiskCache[learner.LearnerId];
+                                    <tr>
+                                        <td>@learner.User?.Fullname</td>
+                                        <td>
+                                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:@StatusColor(risk.Level);margin-right:4px;"></span>
+                                            @risk.Level
+                                        </td>
+                                        <td>@risk.AttendancePercentage.ToString("F1")%</td>
+                                        <td>@risk.AcademicAverage.ToString("F1")%</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            </div>
+        </div>
+    }
 
     @if (atRiskLearners.Count > 0)
     {
@@ -93,6 +200,7 @@ else
 
 @code {
     private List<Subject> subjects = new();
+    private List<Learner> allLearnersInSubject = new();
     private List<Learner> atRiskLearners = new();
     private Dictionary<int, RiskData> learnerRiskCache = new();
     private int selectedSubjectId = 0;
@@ -100,12 +208,75 @@ else
     private Teacher? currentTeacher;
     private int? currentSchoolId;
     private string errorMessage = string.Empty;
+    private int? hoveredLearnerId;
+    private bool isLoadingRisk = false;
 
     private int currentPage = 1;
     private const int PageSize = 15;
     private int totalPages => (int)Math.Ceiling(atRiskLearners.Count / (double)PageSize);
     private List<Learner> PagedAtRisk => atRiskLearners.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
     private void GoToPage(int page) => currentPage = page;
+
+    // Scatter chart geometry (SVG viewBox units)
+    private const double ChartWidth = 620;
+    private const double ChartHeight = 420;
+    private const double ChartLeft = 60;
+    private const double ChartTop = 20;
+    private const double ChartRight = 20;
+    private const double ChartBottomMargin = 50;
+    private static double PlotWidth => ChartWidth - ChartLeft - ChartRight;
+    private static double PlotHeight => ChartHeight - ChartTop - ChartBottomMargin;
+    private static readonly int[] ChartTicks = { 0, 20, 40, 60, 80, 100 };
+
+    private static double ChartX(decimal attendancePercentage)
+    {
+        var clamped = (double)Math.Clamp(attendancePercentage, 0, 100);
+        return ChartLeft + (clamped / 100.0) * PlotWidth;
+    }
+
+    private static double ChartX(int attendancePercentage) => ChartX((decimal)attendancePercentage);
+
+    private static double ChartY(decimal academicAverage)
+    {
+        var clamped = (double)Math.Clamp(academicAverage, 0, 100);
+        return ChartTop + (1 - clamped / 100.0) * PlotHeight;
+    }
+
+    private static double ChartY(int academicAverage) => ChartY((decimal)academicAverage);
+
+    // Rendered via MarkupString: a bare <text> element as the first markup inside a
+    // @foreach code block collides with Razor's own reserved <text> transition tag (RZ1023).
+    private static MarkupString TickLabelX(int tick)
+    {
+        var gx = ChartX(tick).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var y = (ChartTop + PlotHeight + 18).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return new MarkupString(
+            $"<text x=\"{gx}\" y=\"{y}\" font-size=\"11\" fill=\"#898781\" text-anchor=\"middle\">{tick}</text>");
+    }
+
+    private static MarkupString TickLabelY(int tick)
+    {
+        var x = (ChartLeft - 8).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var gy = (ChartY(tick) + 4).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return new MarkupString(
+            $"<text x=\"{x}\" y=\"{gy}\" font-size=\"11\" fill=\"#898781\" text-anchor=\"end\">{tick}</text>");
+    }
+
+    private static readonly (string Level, string Color)[] RiskLevelLegend =
+    {
+        ("Critical", "#d03b3b"),
+        ("High", "#ec835a"),
+        ("Moderate", "#fab219"),
+        ("Low", "#0ca30c")
+    };
+
+    private static string StatusColor(string level) => level switch
+    {
+        "Critical" => "#d03b3b",
+        "High" => "#ec835a",
+        "Moderate" => "#fab219",
+        _ => "#0ca30c" // Low
+    };
 
     private void ViewLearnerProfile(Learner learner)
     {
@@ -152,46 +323,61 @@ else
 
     private async Task LoadAtRiskLearners()
     {
+        // Guard against overlapping runs (e.g. a double-click): without this, two concurrent
+        // calls interleave their awaits and clobber the shared learnerRiskCache/allLearnersInSubject
+        // fields mid-flight, leaving a learner in one list whose risk entry the other run just wiped.
+        if (isLoadingRisk) return;
+        if (selectedSubjectId == 0) return;
+
+        if (!subjects.Any(s => s.SubjectId == selectedSubjectId))
+        {
+            errorMessage = "Subject not found.";
+            return;
+        }
+
+        isLoadingRisk = true;
+        hasLoaded = false;
+        hoveredLearnerId = null;
+
         try
         {
-            if (selectedSubjectId == 0) return;
+            var subjectId = selectedSubjectId;
 
-            if (!subjects.Any(s => s.SubjectId == selectedSubjectId))
-            {
-                errorMessage = "Subject not found.";
-                return;
-            }
-
-            hasLoaded = false;
-            learnerRiskCache.Clear();
-            atRiskLearners.Clear();
-
-            atRiskLearners = await DbContext.LearnerSubjects
+            var learners = await DbContext.LearnerSubjects
                 .AsNoTracking()
-                .Where(ls => ls.SubjectId == selectedSubjectId)
+                .Where(ls => ls.SubjectId == subjectId)
                 .Include(ls => ls.Learner)
                 .ThenInclude(l => l.User)
                 .Select(ls => ls.Learner)
                 .ToListAsync();
 
-            // Pre-calculate all risk data
-            foreach (var learner in atRiskLearners)
+            // Build into local variables first — the shared fields are only ever
+            // updated together, in one shot, so a render can never see one field
+            // (allLearnersInSubject) reflect this load while another (learnerRiskCache)
+            // still reflects a previous or concurrent one.
+            var riskCache = new Dictionary<int, RiskData>();
+            foreach (var learner in learners)
             {
-                var riskData = await RiskAssessment.CalculateRiskScore(learner.LearnerId, selectedSubjectId);
-                learnerRiskCache[learner.LearnerId] = riskData;
+                riskCache[learner.LearnerId] = await RiskAssessment.CalculateRiskScore(learner.LearnerId, subjectId);
             }
 
-            // Filter to only at-risk learners
-            atRiskLearners = atRiskLearners
-                .Where(l => learnerRiskCache[l.LearnerId].Score >= RiskAssessmentService.AtRiskThreshold)
+            var flagged = learners
+                .Where(l => riskCache[l.LearnerId].Score >= RiskAssessmentService.AtRiskThreshold)
                 .ToList();
 
+            allLearnersInSubject = learners;
+            learnerRiskCache = riskCache;
+            atRiskLearners = flagged;
             hasLoaded = true;
             currentPage = 1;
         }
         catch (Exception ex)
         {
             errorMessage = $"Error loading at-risk learners: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingRisk = false;
         }
     }
 }
