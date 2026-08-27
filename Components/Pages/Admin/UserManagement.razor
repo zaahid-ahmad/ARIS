@@ -319,10 +319,11 @@ else
                     <button type="button" class="btn-close" @onclick="CloseImportModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Upload a CSV or Excel (.xlsx) file with columns: <code>FullName, Email, Role, Grade, ClassName, Password</code>.</p>
+                    <p>Upload a CSV or Excel (.xlsx) file with columns: <code>FullName, Email, Role, Grade, ClassName, Password, LinkedLearnerEmails</code>.</p>
                     <ul class="small text-muted">
-                        <li><strong>Role</strong> must be <code>Teacher</code> or <code>Learner</code>.</li>
+                        <li><strong>Role</strong> must be <code>Teacher</code>, <code>Learner</code>, or <code>Parent</code>.</li>
                         <li><strong>Grade</strong> and <strong>ClassName</strong> apply to learners only (e.g. Grade 10, Class 10A).</li>
+                        <li><strong>LinkedLearnerEmails</strong> applies to parents only — one or more existing learner emails, separated by semicolons (e.g. <code>john.smith@school.com;jane.smith@school.com</code>). The learner(s) must already exist in your school before this import runs.</li>
                         <li><strong>Password</strong> is optional — leave blank to auto-generate one (shown in the results below).</li>
                     </ul>
                     <a class="btn btn-link p-0 mb-3" href="/templates/bulk-user-import-template.csv" download>

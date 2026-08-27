@@ -1,3 +1,4 @@
-FullName,Email,Role,Grade,ClassName,Password
-Jane Doe,jane.doe@school.com,Teacher,,,
-John Smith,john.smith@school.com,Learner,10,10A,
+FullName,Email,Role,Grade,ClassName,Password,LinkedLearnerEmails
+Jane Doe,jane.doe@school.com,Teacher,,,,
+John Smith,john.smith@school.com,Learner,10,10A,,
+Mary Smith,mary.smith@school.com,Parent,,,,john.smith@school.com

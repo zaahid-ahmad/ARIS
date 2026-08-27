@@ -22,7 +22,7 @@ namespace ARIS1.Services
             _dbContext = dbContext;
         }
 
-        public static readonly string[] TemplateHeaders = { "FullName", "Email", "Role", "Grade", "ClassName", "Password" };
+        public static readonly string[] TemplateHeaders = { "FullName", "Email", "Role", "Grade", "ClassName", "Password", "LinkedLearnerEmails" };
 
         public List<Dictionary<string, string>> ParseFile(Stream stream, string fileExtension)
         {
@@ -96,10 +96,11 @@ namespace ARIS1.Services
                 var gradeRaw = row.GetValueOrDefault("Grade", string.Empty).Trim();
                 var className = row.GetValueOrDefault("ClassName", string.Empty).Trim();
                 var password = row.GetValueOrDefault("Password", string.Empty).Trim();
+                var linkedLearnerEmailsRaw = row.GetValueOrDefault("LinkedLearnerEmails", string.Empty).Trim();
 
                 if (row.Values.All(string.IsNullOrWhiteSpace)) continue; // skip blank rows
 
-                var validationError = ValidateRow(fullName, email, role, gradeRaw, className, seenEmails);
+                var validationError = ValidateRow(fullName, email, role, gradeRaw, className, linkedLearnerEmailsRaw, seenEmails);
                 if (validationError != null)
                 {
                     results.Add(new ImportRowResult(rowNumber, fullName, email, role, false, validationError, null));
@@ -107,7 +108,9 @@ namespace ARIS1.Services
                 }
 
                 seenEmails.Add(email);
-                var normalizedRole = string.Equals(role, "Teacher", StringComparison.OrdinalIgnoreCase) ? "Teacher" : "Learner";
+                var normalizedRole = string.Equals(role, "Teacher", StringComparison.OrdinalIgnoreCase) ? "Teacher"
+                    : string.Equals(role, "Parent", StringComparison.OrdinalIgnoreCase) ? "Parent"
+                    : "Learner";
 
                 SchoolClass? matchedClass = null;
                 if (normalizedRole == "Learner")
@@ -127,6 +130,40 @@ namespace ARIS1.Services
                 {
                     results.Add(new ImportRowResult(rowNumber, fullName, email, normalizedRole, false, "Email already in use.", null));
                     continue;
+                }
+
+                // Resolve every linked learner before creating anything — a Parent row either
+                // fully succeeds (account created, every listed child linked) or creates nothing
+                // at all. Deliberately does not resolve a learner being created earlier in this
+                // same file: only already-existing learners can be linked here.
+                var linkedLearnerIds = new List<int>();
+                if (normalizedRole == "Parent")
+                {
+                    var candidateEmails = linkedLearnerEmailsRaw
+                        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                    var unresolved = new List<string>();
+                    foreach (var candidateEmail in candidateEmails)
+                    {
+                        var candidateUser = await _userManager.FindByEmailAsync(candidateEmail);
+                        var candidateLearner = candidateUser == null
+                            ? null
+                            : await _dbContext.Learners.FirstOrDefaultAsync(l => l.UserId == candidateUser.Id);
+
+                        if (candidateUser == null || candidateUser.SchoolId != schoolId || candidateLearner == null)
+                            unresolved.Add(candidateEmail);
+                        else
+                            linkedLearnerIds.Add(candidateLearner.LearnerId);
+                    }
+
+                    if (unresolved.Count > 0)
+                    {
+                        results.Add(new ImportRowResult(rowNumber, fullName, email, normalizedRole, false,
+                            $"LinkedLearnerEmails not found as an existing learner in your school: {string.Join(", ", unresolved)}. " +
+                            "Only learners that already exist before this import can be linked — a parent and their child cannot be created in the same file.",
+                            null));
+                        continue;
+                    }
                 }
 
                 var passwordGenerated = string.IsNullOrEmpty(password);
@@ -158,6 +195,19 @@ namespace ARIS1.Services
                     {
                         _dbContext.Teachers.Add(new Teacher { UserId = user.Id });
                     }
+                    else if (normalizedRole == "Parent")
+                    {
+                        var parent = new Parent { UserId = user.Id };
+                        foreach (var learnerId in linkedLearnerIds)
+                        {
+                            parent.Children.Add(new ParentLearner
+                            {
+                                LearnerId = learnerId,
+                                CreatedDate = DateTime.UtcNow
+                            });
+                        }
+                        _dbContext.Parents.Add(parent);
+                    }
                     else
                     {
                         _dbContext.Learners.Add(new Learner
@@ -183,7 +233,7 @@ namespace ARIS1.Services
             return results;
         }
 
-        private static string? ValidateRow(string fullName, string email, string role, string gradeRaw, string className, HashSet<string> seenEmails)
+        private static string? ValidateRow(string fullName, string email, string role, string gradeRaw, string className, string linkedLearnerEmailsRaw, HashSet<string> seenEmails)
         {
             if (string.IsNullOrWhiteSpace(fullName) || fullName.Trim().Length < 2)
                 return "Full name is required (min 2 characters).";
@@ -195,8 +245,9 @@ namespace ARIS1.Services
                 return "Duplicate email within the import file.";
 
             if (!string.Equals(role, "Teacher", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(role, "Learner", StringComparison.OrdinalIgnoreCase))
-                return "Role must be 'Teacher' or 'Learner'.";
+                !string.Equals(role, "Learner", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(role, "Parent", StringComparison.OrdinalIgnoreCase))
+                return "Role must be 'Teacher', 'Learner', or 'Parent'.";
 
             if (string.Equals(role, "Learner", StringComparison.OrdinalIgnoreCase))
             {
@@ -205,6 +256,22 @@ namespace ARIS1.Services
 
                 if (string.IsNullOrWhiteSpace(className))
                     return "ClassName is required for learners.";
+            }
+
+            if (string.Equals(role, "Parent", StringComparison.OrdinalIgnoreCase))
+            {
+                var candidateEmails = linkedLearnerEmailsRaw
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                if (candidateEmails.Length == 0)
+                    return "LinkedLearnerEmails is required for Parent rows (semicolon-separated learner email(s)).";
+
+                var invalidFormat = candidateEmails.FirstOrDefault(e => !new EmailAddressAttribute().IsValid(e));
+                if (invalidFormat != null)
+                    return $"'{invalidFormat}' in LinkedLearnerEmails is not a valid email address.";
+
+                if (candidateEmails.Length != candidateEmails.Distinct(StringComparer.OrdinalIgnoreCase).Count())
+                    return "LinkedLearnerEmails contains a duplicate email within the same row.";
             }
 
             return null;
