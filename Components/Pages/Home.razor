@@ -25,6 +25,8 @@
                 Navigation.NavigateTo("/learner/dashboard");
             else if (user.IsInRole("SuperAdmin"))
                 Navigation.NavigateTo("/superadmin/dashboard");
+            else if (user.IsInRole("Parent"))
+                Navigation.NavigateTo("/parent/dashboard");
             else
                 Navigation.NavigateTo("/access-denied");
         }

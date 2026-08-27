@@ -1,0 +1,137 @@
+@page "/parent/marks/{LearnerId:int}"
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Models
+@using ARIS1.Data
+@using ARIS1.Services
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Parent")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject AuthenticationStateProvider AuthStateProvider
+@inject SchoolAuthorizationService SchoolAuth
+
+@if (accessDenied)
+{
+    <div class="alert alert-danger">You do not have access to this learner's data.</div>
+}
+else if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+else if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <a href="/parent/dashboard">&larr; Back to my children</a>
+    <h4 class="mt-2">@learnerName's Marks</h4>
+
+    @if (subjects.Count == 0)
+    {
+        <p class="text-muted">Not enrolled in any subjects yet.</p>
+    }
+    else
+    {
+        @foreach (var subject in subjects)
+        {
+            var subjectMarks = subjectMarksCache.ContainsKey(subject.SubjectId)
+                ? subjectMarksCache[subject.SubjectId]
+                : new List<LearnerMark>();
+
+            <div class="card mb-3">
+                <div class="card-header"><h5>@subject.Name (Grade @subject.Grade)</h5></div>
+                <div class="card-body">
+                    @if (subjectMarks.Count == 0)
+                    {
+                        <p class="text-muted">No marks yet.</p>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Assessment</th><th>Mark</th><th>Percentage</th></tr></thead>
+                            <tbody>
+                                @foreach (var mark in subjectMarks)
+                                {
+                                    var percentage = (mark.MarksAwarded / mark.Assessment.MaxMark) * 100;
+                                    <tr>
+                                        <td>@mark.Assessment.Title</td>
+                                        <td>@mark.MarksAwarded.ToString("0.##") / @mark.Assessment.MaxMark.ToString("0.##")</td>
+                                        <td>@percentage.ToString("F1")%</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        <p><strong>Subject Average: @subjectMarks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100).ToString("F1")%</strong></p>
+                    }
+                </div>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public int LearnerId { get; set; }
+
+    private bool accessDenied;
+    private string? learnerName;
+    private List<Subject>? subjects;
+    private Dictionary<int, List<LearnerMark>> subjectMarksCache = new();
+    private string errorMessage = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        accessDenied = false;
+        errorMessage = string.Empty;
+        subjects = null;
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+
+        if (!await SchoolAuth.HasAccessToLearner(userName, LearnerId))
+        {
+            accessDenied = true;
+            return;
+        }
+
+        try
+        {
+            var learner = await DbContext.Learners
+                .AsNoTracking()
+                .Include(l => l.User)
+                .FirstOrDefaultAsync(l => l.LearnerId == LearnerId);
+
+            if (learner == null)
+            {
+                accessDenied = true; // defense in depth — never trust the route param alone
+                return;
+            }
+
+            learnerName = learner.User.Fullname;
+
+            subjects = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.LearnerId == LearnerId)
+                .Include(ls => ls.Subject)
+                .Select(ls => ls.Subject)
+                .ToListAsync();
+
+            var allMarks = await DbContext.LearnerMarks
+                .AsNoTracking()
+                .Where(m => m.LearnerId == LearnerId && !m.IsAbsent)
+                .Include(m => m.Assessment)
+                .ToListAsync();
+
+            foreach (var subject in subjects)
+            {
+                subjectMarksCache[subject.SubjectId] = allMarks
+                    .Where(m => m.Assessment.SubjectId == subject.SubjectId)
+                    .ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading marks: {ex.Message}";
+        }
+    }
+}

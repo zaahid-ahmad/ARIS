@@ -61,6 +61,7 @@
                 <option value="">-- Select Role --</option>
                 <option value="Teacher">Teacher</option>
                 <option value="Learner">Learner</option>
+                <option value="Parent">Parent</option>
             </select>
             @if (roleError != null)
             {
@@ -94,6 +95,43 @@
                 }
             </div>
         }
+
+        @if (role == "Parent")
+        {
+            <div class="mb-3">
+                <label class="form-label">Link to Children <span class="text-danger">*</span></label>
+                <input class="form-control mb-2" placeholder="Search learners by name..."
+                       @bind="learnerSearchTerm" @bind:event="oninput" />
+                <div class="border rounded p-2 @(childrenError != null ? "is-invalid" : "")" style="max-height: 220px; overflow-y: auto;">
+                    @if (FilteredLearners.Count == 0)
+                    {
+                        <p class="text-muted mb-0">No matching learners found.</p>
+                    }
+                    else
+                    {
+                        @foreach (var learner in FilteredLearners)
+                        {
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox"
+                                       checked="@selectedLearnerIds.Contains(learner.LearnerId)"
+                                       @onchange="@((e) => ToggleLearnerSelection(learner.LearnerId, (bool)e.Value!))" />
+                                <label class="form-check-label">
+                                    @learner.User?.Fullname (Grade @learner.Grade — @learner.ClassName)
+                                </label>
+                            </div>
+                        }
+                    }
+                </div>
+                @if (childrenError != null)
+                {
+                    <div class="invalid-feedback d-block">@childrenError</div>
+                }
+                @if (selectedLearnerIds.Count > 0)
+                {
+                    <small class="text-muted">@selectedLearnerIds.Count learner(s) selected.</small>
+                }
+            </div>
+        }
         <button class="btn btn-primary" @onclick="CreateUserAsync">Create User</button>
         <button class="btn btn-secondary ms-2" @onclick='() => Navigation.NavigateTo("/admin/users")'>Cancel</button>
     </div>
@@ -115,10 +153,49 @@
     private string? roleError;
     private string? gradeError;
     private string? classNameError;
+    private string? childrenError;
+
+    private int? currentAdminSchoolId;
+    private List<Learner> schoolLearners = new();
+    private string learnerSearchTerm = string.Empty;
+    private HashSet<int> selectedLearnerIds = new();
+
+    private List<Learner> FilteredLearners => string.IsNullOrWhiteSpace(learnerSearchTerm)
+        ? schoolLearners
+        : schoolLearners
+            .Where(l => l.User!.Fullname.Contains(learnerSearchTerm, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    private void ToggleLearnerSelection(int learnerId, bool isChecked)
+    {
+        if (isChecked) selectedLearnerIds.Add(learnerId);
+        else selectedLearnerIds.Remove(learnerId);
+        childrenError = null;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+        if (string.IsNullOrEmpty(userName)) return;
+
+        var currentAdmin = await UserManager.FindByNameAsync(userName);
+        currentAdminSchoolId = currentAdmin?.SchoolId;
+
+        if (currentAdminSchoolId != null)
+        {
+            schoolLearners = await DbContext.Learners
+                .AsNoTracking()
+                .Include(l => l.User)
+                .Where(l => l.User!.SchoolId == currentAdminSchoolId)
+                .OrderBy(l => l.User!.Fullname)
+                .ToListAsync();
+        }
+    }
 
     private bool ValidateForm()
     {
-        fullNameError = emailError = passwordError = roleError = gradeError = classNameError = null;
+        fullNameError = emailError = passwordError = roleError = gradeError = classNameError = childrenError = null;
         var valid = true;
 
         if (string.IsNullOrWhiteSpace(fullName))
@@ -152,6 +229,9 @@
             { classNameError = $"Class must be grade {grade} followed by a single letter, e.g. {grade}A."; valid = false; }
         }
 
+        if (role == "Parent" && selectedLearnerIds.Count == 0)
+        { childrenError = "Select at least one learner to link to this parent account."; valid = false; }
+
         return valid;
     }
 
@@ -182,6 +262,23 @@
         var existingUser = await UserManager.FindByEmailAsync(email);
         if (existingUser != null)
         { emailError = "This email is already in use."; return; }
+
+        // Server-side re-validation: never trust the client-side selection alone — every
+        // selected learner must actually belong to this admin's own school.
+        var validatedLearnerIds = new List<int>();
+        if (role == "Parent")
+        {
+            validatedLearnerIds = await DbContext.Learners
+                .Where(l => selectedLearnerIds.Contains(l.LearnerId) && l.User.SchoolId == currentAdmin.SchoolId)
+                .Select(l => l.LearnerId)
+                .ToListAsync();
+
+            if (validatedLearnerIds.Count != selectedLearnerIds.Count)
+            {
+                errorMessage = "One or more selected learners are no longer valid. Please refresh and try again.";
+                return;
+            }
+        }
 
         var user = new User
         {
@@ -219,6 +316,18 @@
                     DbContext.Learners.Add(learner);
                     await DbContext.SaveChangesAsync();
                 }
+                else if (role == "Parent")
+                {
+                    var parent = new Parent { UserId = user.Id };
+                    DbContext.Parents.Add(parent);
+                    await DbContext.SaveChangesAsync();
+
+                    foreach (var learnerId in validatedLearnerIds)
+                    {
+                        DbContext.ParentLearners.Add(new ParentLearner { ParentId = parent.ParentId, LearnerId = learnerId });
+                    }
+                    await DbContext.SaveChangesAsync();
+                }
 
                 successMessage = $"{role} account created successfully!";
                 fullName = string.Empty;
@@ -227,12 +336,19 @@
                 role = string.Empty;
                 grade = "10";
                 className = string.Empty;
+                selectedLearnerIds.Clear();
+                learnerSearchTerm = string.Empty;
 
                 await Task.Delay(1500);
                 Navigation.NavigateTo("/admin/users");
             }
             catch (Exception ex)
             {
+                if (role == "Parent")
+                {
+                    // Never leave a User row behind with no matching Parent/ParentLearner rows.
+                    await UserManager.DeleteAsync(user);
+                }
                 errorMessage = $"Error creating {role} record: {ex.Message}";
             }
         }

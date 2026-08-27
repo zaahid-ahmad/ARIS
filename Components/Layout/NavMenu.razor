@@ -79,6 +79,15 @@
             </a>
         </Authorized>
     </AuthorizeView>
+
+    <AuthorizeView Roles="Parent" Context="parentContext">
+        <Authorized>
+            <div class="nav-section-label">Parent</div>
+            <a class="@NavClass("/parent/dashboard")" href="/parent/dashboard">
+                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
+            </a>
+        </Authorized>
+    </AuthorizeView>
 </nav>
 
 @code {

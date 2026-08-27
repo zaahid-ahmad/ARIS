@@ -1,0 +1,60 @@
+@page "/parent/dashboard"
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Models
+@using ARIS1.Data
+@using ARIS1.Services
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Parent")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject AuthenticationStateProvider AuthStateProvider
+@inject SchoolAuthorizationService SchoolAuth
+@inject NavigationManager Navigation
+
+<h2>My Children</h2>
+
+@if (children == null)
+{
+    <p>Loading...</p>
+}
+else if (children.Count == 0)
+{
+    <p class="text-muted">No children are linked to your account yet. Contact your school's administrator.</p>
+}
+else
+{
+    <div class="row mt-4">
+        @foreach (var child in children)
+        {
+            <div class="col-md-4">
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">@child.User.Fullname</h5>
+                        <p class="card-text text-muted">Grade @child.Grade — @child.ClassName</p>
+                        <button class="btn btn-primary btn-sm" @onclick='() => Navigation.NavigateTo($"/parent/overview/{child.LearnerId}")'>Overview</button>
+                        <button class="btn btn-secondary btn-sm" @onclick='() => Navigation.NavigateTo($"/parent/marks/{child.LearnerId}")'>Marks</button>
+                        <button class="btn btn-secondary btn-sm" @onclick='() => Navigation.NavigateTo($"/parent/attendance/{child.LearnerId}")'>Attendance</button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<Learner>? children;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+
+        var accessibleIds = await SchoolAuth.GetAccessibleLearnerIds(userName);
+
+        children = await DbContext.Learners
+            .AsNoTracking()
+            .Include(l => l.User)
+            .Where(l => accessibleIds.Contains(l.LearnerId))
+            .ToListAsync();
+    }
+}

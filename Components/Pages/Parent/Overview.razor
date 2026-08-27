@@ -1,0 +1,139 @@
+@page "/parent/overview/{LearnerId:int}"
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Models
+@using ARIS1.Data
+@using ARIS1.Services
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Parent")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject AuthenticationStateProvider AuthStateProvider
+@inject SchoolAuthorizationService SchoolAuth
+
+@if (accessDenied)
+{
+    <div class="alert alert-danger">You do not have access to this learner's data.</div>
+}
+else if (learner == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <a href="/parent/dashboard">&larr; Back to my children</a>
+    <h2 class="mt-2">@learner.User.Fullname</h2>
+    <p class="text-muted">Grade @learner.Grade — @learner.ClassName</p>
+
+    <hr />
+    <h4>Alerts</h4>
+
+    var subjectsWithAlerts = subjects
+        .Select(s => new
+        {
+            Subject = s,
+            Groups = interventions
+                .Where(i => i.Question.Assessment.SubjectId == s.SubjectId && AlertLevels.Contains(i.Level))
+                .GroupBy(i => i.Level)
+                .OrderBy(g => Array.IndexOf(AlertLevels, g.Key))
+                .ToList()
+        })
+        .Where(x => x.Groups.Count > 0)
+        .ToList();
+
+    @if (subjectsWithAlerts.Count == 0)
+    {
+        <div class="alert alert-success">No active alerts — @learner.User.Fullname is on track in all subjects.</div>
+    }
+    else
+    {
+        @foreach (var entry in subjectsWithAlerts)
+        {
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">@entry.Subject.Name (Grade @entry.Subject.Grade)</h5>
+                </div>
+                <div class="card-body">
+                    @foreach (var levelGroup in entry.Groups)
+                    {
+                        var (badgeColor, textColor) = GetLevelColors(levelGroup.Key);
+                        <div class="mb-3">
+                            <span class="badge mb-2" style="background-color: @badgeColor; color: @textColor;">
+                                @levelGroup.Key (@levelGroup.Count())
+                            </span>
+                            <ul class="mb-0">
+                                @foreach (var item in levelGroup.OrderBy(i => i.PercentageScore))
+                                {
+                                    <li>@item.Topic — @item.PercentageScore.ToString("F1")% — @item.Message</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public int LearnerId { get; set; }
+
+    private bool accessDenied;
+    private Learner? learner;
+    private List<Subject> subjects = new();
+    private List<Intervention> interventions = new();
+    private static readonly string[] AlertLevels = { "Critical", "Attention", "Focus" };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        accessDenied = false;
+        learner = null;
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+
+        if (!await SchoolAuth.HasAccessToLearner(userName, LearnerId))
+        {
+            accessDenied = true;
+            return;
+        }
+
+        learner = await DbContext.Learners
+            .AsNoTracking()
+            .Include(l => l.User)
+            .FirstOrDefaultAsync(l => l.LearnerId == LearnerId);
+
+        if (learner == null)
+        {
+            accessDenied = true; // defense in depth — never trust the route param alone
+            return;
+        }
+
+        subjects = await DbContext.LearnerSubjects
+            .AsNoTracking()
+            .Where(ls => ls.LearnerId == LearnerId)
+            .Include(ls => ls.Subject)
+            .Select(ls => ls.Subject)
+            .ToListAsync();
+
+        interventions = await DbContext.Interventions
+            .AsNoTracking()
+            .Where(i => i.LearnerId == LearnerId)
+            .Include(i => i.Question)
+            .ThenInclude(q => q.Assessment)
+            .OrderBy(i => i.Question.Assessment.Term)
+            .ThenBy(i => i.Level)
+            .ToListAsync();
+    }
+
+    // Same mapping as Learner/Dashboard.razor's GetLevelColors — kept identical rather than
+    // re-derived, per Phase 3 spec. Duplicated (not shared) because Learner/Dashboard.razor
+    // is off-limits to touch in this phase, so the helper can't be extracted/exposed from there.
+    private static (string BadgeColor, string TextColor) GetLevelColors(string level) => level switch
+    {
+        "Critical" => ("#dc3545", "white"),
+        "Attention" => ("#fd7e14", "white"),
+        "Focus" => ("#ffc107", "black"),
+        "Minor" => ("#90EE90", "black"),
+        _ => ("#198754", "white")
+    };
+}
