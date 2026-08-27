@@ -69,11 +69,6 @@ a:not(.btn):not(.nav-link):not(.navbar-brand) {
     letter-spacing: 0.3px;
 }
 
-    .card-header, .card-header h1, .card-header h2, .card-header h3,
-    .card-header h4, .card-header h5, .card-header h6 {
-        color: #fff;
-    }
-
 /* Buttons */
 .btn {
     border-radius: 10px;
@@ -228,18 +223,9 @@ a:not(.btn):not(.nav-link):not(.navbar-brand) {
 }
 
 .modal-header {
-    background: linear-gradient(135deg, var(--primary), var(--secondary));
     border: none;
     border-radius: var(--radius) var(--radius) 0 0;
 }
-
-.modal-header, .modal-title {
-    color: #fff;
-}
-
-    .modal-header .btn-close {
-        filter: brightness(0) invert(1);
-    }
 
 /* ===== Blazor essentials — keep these ===== */
 .valid.modified:not([type=checkbox]) {

@@ -4,6 +4,10 @@
     box-sizing: border-box;
 }
 
+html {
+    font-size: 19px; /* base for all rem-sized text/spacing below (default is 16px) */
+}
+
 :root {
     --ink: #0f1923;
     --ink-2: #2d3d4f;
@@ -43,7 +47,7 @@ body {
     background: var(--surface);
     color: var(--ink);
     min-height: 100vh;
-    font-size: 14px;
+    font-size: 17px;
 }
 
 .top-icons-bar {
