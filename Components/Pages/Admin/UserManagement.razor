@@ -61,6 +61,7 @@ else
             @foreach (var user in PagedUsers)
             {
                 var learner = learnerByUserId.GetValueOrDefault(user.Id);
+                var parent = parentByUserId.GetValueOrDefault(user.Id);
                 <tr>
                     <td>@user.Fullname</td>
                     <td>@user.Email</td>
@@ -73,6 +74,13 @@ else
                             <button class="btn btn-info btn-sm ms-1"
                                     @onclick="() => ShowEditClass(learner.LearnerId, user.Fullname, learner.Grade, learner.ClassName)">
                                 Edit Class
+                            </button>
+                        }
+                        @if (parent != null)
+                        {
+                            <button class="btn btn-outline-info btn-sm ms-1"
+                                    @onclick="() => ShowEditChildren(parent.ParentId, user.Fullname)">
+                                Edit Children
                             </button>
                         }
                         @if (user.IsActive)
@@ -202,6 +210,93 @@ else
     </div>
 }
 
+<!-- EDIT CHILDREN MODAL -->
+@if (parentToEditId != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Linked Children for @parentToEditName</h5>
+                    <button type="button" class="btn-close" @onclick="CancelEditChildren"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(editChildrenError))
+                    {
+                        <div class="alert alert-danger">@editChildrenError</div>
+                    }
+
+                    <h6>Currently Linked</h6>
+                    @if (isLoadingChildren)
+                    {
+                        <p><em>Loading...</em></p>
+                    }
+                    else if (linkedChildren.Count == 0)
+                    {
+                        <p class="text-muted">No children linked yet.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-group mb-3">
+                            @foreach (var child in linkedChildren)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    @child.User.Fullname (Grade @child.Grade — @child.ClassName)
+                                    <button class="btn btn-outline-danger btn-sm"
+                                            @onclick="() => RemoveChild(child.LearnerId)"
+                                            disabled="@isMutatingChildren">
+                                        Remove
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+
+                    <hr />
+                    <h6>Add a Child</h6>
+                    <div class="d-flex gap-2 mb-2">
+                        <input class="form-control" placeholder="Search by learner name..."
+                               @bind="childSearchTerm" autocomplete="off" />
+                        <button class="btn btn-primary" @onclick="SearchAvailableChildren" disabled="@isSearchingChildren">
+                            Search
+                        </button>
+                    </div>
+                    @if (isSearchingChildren)
+                    {
+                        <p><em>Searching...</em></p>
+                    }
+                    else if (childSearchResults != null)
+                    {
+                        @if (childSearchResults.Count == 0)
+                        {
+                            <p class="text-muted">No matching, unlinked learners found in your school.</p>
+                        }
+                        else
+                        {
+                            <ul class="list-group">
+                                @foreach (var candidate in childSearchResults)
+                                {
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        @candidate.User.Fullname (Grade @candidate.Grade — @candidate.ClassName)
+                                        <button class="btn btn-outline-success btn-sm"
+                                                @onclick="() => AddChild(candidate.LearnerId)"
+                                                disabled="@isMutatingChildren">
+                                            Add
+                                        </button>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelEditChildren">Done</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <!-- BULK IMPORT MODAL -->
 @if (showImportModal)
 {
@@ -304,6 +399,16 @@ else
     private List<User>? users;
     private Dictionary<string, string> userRoles = new();
     private Dictionary<string, Learner> learnerByUserId = new();
+    private Dictionary<string, Parent> parentByUserId = new();
+    private int? parentToEditId;
+    private string parentToEditName = string.Empty;
+    private bool isLoadingChildren;
+    private bool isSearchingChildren;
+    private bool isMutatingChildren;
+    private string? editChildrenError;
+    private List<Learner> linkedChildren = new();
+    private string childSearchTerm = string.Empty;
+    private List<Learner>? childSearchResults;
     private User? userToDeactivate;
     private string? userToResetId;
     private string userToResetName = string.Empty;
@@ -399,6 +504,10 @@ else
             learnerByUserId = await DbContext.Learners
                 .Where(l => userIds.Contains(l.UserId))
                 .ToDictionaryAsync(l => l.UserId);
+
+            parentByUserId = await DbContext.Parents
+                .Where(p => userIds.Contains(p.UserId))
+                .ToDictionaryAsync(p => p.UserId);
         }
         catch (Exception ex)
         {
@@ -584,6 +693,182 @@ else
         learnerToEditGrade = 0;
         editClassName = string.Empty;
         classNameEditError = null;
+    }
+
+    private async Task ShowEditChildren(int parentId, string fullname)
+    {
+        // Same reentrancy guard as isImporting/isLoadingRisk/isLoadingProfile elsewhere in
+        // this app: a double-click fires this handler twice before the first await resolves.
+        if (isLoadingChildren) return;
+
+        parentToEditId = parentId;
+        parentToEditName = fullname;
+        editChildrenError = null;
+        childSearchTerm = string.Empty;
+        childSearchResults = null;
+        isLoadingChildren = true;
+        StateHasChanged();
+
+        try
+        {
+            linkedChildren = await DbContext.ParentLearners
+                .AsNoTracking()
+                .Where(pl => pl.ParentId == parentId)
+                .Include(pl => pl.Learner).ThenInclude(l => l.User)
+                .Select(pl => pl.Learner)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            editChildrenError = $"Error loading linked children: {ex.Message}";
+            linkedChildren = new();
+        }
+        finally
+        {
+            isLoadingChildren = false;
+        }
+    }
+
+    private async Task SearchAvailableChildren()
+    {
+        if (isSearchingChildren || parentToEditId == null || currentSchoolId == null) return;
+
+        isSearchingChildren = true;
+        editChildrenError = null;
+        StateHasChanged();
+
+        try
+        {
+            var linkedIds = linkedChildren.Select(c => c.LearnerId).ToHashSet();
+
+            var query = DbContext.Learners
+                .AsNoTracking()
+                .Include(l => l.User)
+                .Where(l => l.User.SchoolId == currentSchoolId && !linkedIds.Contains(l.LearnerId));
+
+            if (!string.IsNullOrWhiteSpace(childSearchTerm))
+            {
+                var term = childSearchTerm.Trim();
+                query = query.Where(l => l.User.Fullname.Contains(term));
+            }
+
+            childSearchResults = await query.OrderBy(l => l.User.Fullname).Take(25).ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            editChildrenError = $"Error searching learners: {ex.Message}";
+            childSearchResults = new();
+        }
+        finally
+        {
+            isSearchingChildren = false;
+        }
+    }
+
+    private async Task AddChild(int learnerId)
+    {
+        if (isMutatingChildren || parentToEditId == null) return;
+        isMutatingChildren = true;
+        editChildrenError = null;
+        StateHasChanged();
+
+        try
+        {
+            // Re-check server-side, not just trust the on-screen search results — those could
+            // be stale if a second admin tab (or a second admin) changed something in between.
+            var learner = await DbContext.Learners
+                .Include(l => l.User)
+                .FirstOrDefaultAsync(l => l.LearnerId == learnerId);
+
+            if (learner == null || learner.User.SchoolId != currentSchoolId)
+            {
+                editChildrenError = "That learner is no longer available to link.";
+                return;
+            }
+
+            var alreadyLinked = await DbContext.ParentLearners
+                .AnyAsync(pl => pl.ParentId == parentToEditId && pl.LearnerId == learnerId);
+
+            if (alreadyLinked)
+            {
+                editChildrenError = $"{learner.User.Fullname} is already linked.";
+            }
+            else
+            {
+                // A single insert + single SaveChangesAsync is already atomic — no explicit
+                // transaction needed here, unlike the multi-entity Identity+DB flow in account
+                // creation.
+                DbContext.ParentLearners.Add(new ParentLearner
+                {
+                    ParentId = parentToEditId.Value,
+                    LearnerId = learnerId,
+                    CreatedDate = DateTime.UtcNow
+                });
+                await DbContext.SaveChangesAsync();
+                successMessage = $"{learner.User.Fullname} linked to {parentToEditName}.";
+            }
+
+            // Reload the linked list and (if a search was already showing) the search results
+            // together, so the UI never shows the same learner in both lists at once.
+            await ShowEditChildren(parentToEditId.Value, parentToEditName);
+            if (childSearchResults != null)
+                await SearchAvailableChildren();
+        }
+        catch (Exception ex)
+        {
+            editChildrenError = $"Error linking learner: {ex.Message}";
+        }
+        finally
+        {
+            isMutatingChildren = false;
+        }
+    }
+
+    private async Task RemoveChild(int learnerId)
+    {
+        if (isMutatingChildren || parentToEditId == null) return;
+        isMutatingChildren = true;
+        editChildrenError = null;
+        StateHasChanged();
+
+        try
+        {
+            var link = await DbContext.ParentLearners
+                .FirstOrDefaultAsync(pl => pl.ParentId == parentToEditId && pl.LearnerId == learnerId);
+
+            if (link == null)
+            {
+                editChildrenError = "That link no longer exists.";
+            }
+            else
+            {
+                DbContext.ParentLearners.Remove(link);
+                await DbContext.SaveChangesAsync();
+                successMessage = "Child unlinked.";
+            }
+
+            await ShowEditChildren(parentToEditId.Value, parentToEditName);
+            if (childSearchResults != null)
+                await SearchAvailableChildren();
+        }
+        catch (Exception ex)
+        {
+            editChildrenError = $"Error unlinking learner: {ex.Message}";
+        }
+        finally
+        {
+            isMutatingChildren = false;
+        }
+    }
+
+    private void CancelEditChildren()
+    {
+        parentToEditId = null;
+        parentToEditName = string.Empty;
+        editChildrenError = null;
+        linkedChildren = new();
+        childSearchTerm = string.Empty;
+        childSearchResults = null;
     }
 
     private void SearchUsers()

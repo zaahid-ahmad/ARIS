@@ -33,7 +33,7 @@ The app runs at `http://aris1.dev.localhost:5149` (or `https://aris1.dev.localho
 
 ### Multi-Tenancy Model
 
-Everything is scoped to a `School`. The four roles are:
+Everything is scoped to a `School`. The five roles are:
 
 | Role | SchoolId | Access |
 |------|----------|--------|
@@ -41,8 +41,9 @@ Everything is scoped to a `School`. The four roles are:
 | `Admin` | required | Their school only |
 | `Teacher` | required | Their school only |
 | `Learner` | required | Their school only |
+| `Parent` | required | Their own linked children only |
 
-`SchoolAuthorizationService` enforces this: it checks the current user's `SchoolId` and gates access to subjects and other school-scoped data. SuperAdmin bypasses all school checks.
+`SchoolAuthorizationService` enforces this: it checks the current user's `SchoolId` and gates access to subjects and other school-scoped data. SuperAdmin bypasses all school checks. For `Parent`, access isn't school-scoped but link-scoped: `GetAccessibleLearnerIds()` and `HasAccessToLearner()` resolve the calling user's `Parent` → `ParentLearner` rows to determine which specific learners they may view — both deny-by-default (never throw, return empty/`false` on any failure).
 
 ### Page Structure (Blazor Components)
 
@@ -51,8 +52,9 @@ Pages live under `Components/Pages/` organized by role:
 - `Admin/` — user creation, subject management, learner enrollment
 - `Teacher/` — marks entry, attendance, at-risk view, learner profiles
 - `Learner/` — dashboard, marks, attendance, support (interventions)
+- `Parent/` — dashboard (children list), marks, attendance, overview (alerts) — each per-child page takes a `{LearnerId}` route parameter
 
-Each page uses `@attribute [Authorize(Roles = "...")]` to restrict access.
+Each page uses `@attribute [Authorize(Roles = "...")]` to restrict access. The three `Parent/` per-child pages additionally re-check `HasAccessToLearner` inside `OnParametersSetAsync` (not `OnInitializedAsync`) so that a route-parameter change on an already-live component instance re-validates ownership rather than trusting whatever check ran when the component was first constructed.
 
 ### Data Flow for Assessments & Marks
 
@@ -71,7 +73,7 @@ Each page uses `@attribute [Authorize(Roles = "...")]` to restrict access.
 
 ### Database & Seeding
 
-`AppDbContext` extends `IdentityDbContext<User>`. On startup, `DbSeeder.SeedAsync()` creates the four roles, a `Default School`, and default accounts:
+`AppDbContext` extends `IdentityDbContext<User>`. On startup, `DbSeeder.SeedAsync()` creates the five roles, a `Default School`, and default accounts:
 - `superadmin@aris.com` / `SuperAdmin@1234`
 - `admin@aris.com` / `Admin@1234`
 
