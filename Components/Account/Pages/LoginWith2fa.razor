@@ -18,7 +18,6 @@
 <div class="row">
     <div class="col-md-4">
         <EditForm Model="Input" FormName="login-with-2fa" OnValidSubmit="OnValidSubmitAsync" method="post">
-            <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
             <input type="hidden" name="RememberMe" value="@RememberMe" />
             <DataAnnotationsValidator />
             <ValidationSummary class="text-danger" role="alert" />
@@ -41,7 +40,7 @@
 </div>
 <p>
     Don't have access to your authenticator device? You can
-    <a href="Account/LoginWithRecoveryCode?ReturnUrl=@ReturnUrl">log in with a recovery code</a>.
+    <a href="Account/LoginWithRecoveryCode">log in with a recovery code</a>.
 </p>
 
 @code {
@@ -50,9 +49,6 @@
 
     [SupplyParameterFromForm]
     private InputModel Input { get; set; } = default!;
-
-    [SupplyParameterFromQuery]
-    private string? ReturnUrl { get; set; }
 
     [SupplyParameterFromQuery]
     private bool RememberMe { get; set; }
@@ -75,7 +71,8 @@
         if (result.Succeeded)
         {
             Logger.LogInformation("User with ID '{UserId}' logged in with 2fa.", userId);
-            RedirectManager.RedirectTo(ReturnUrl);
+            // Always land on the dashboard — never honor a leftover ReturnUrl.
+            RedirectManager.RedirectTo("/");
         }
         else if (result.IsLockedOut)
         {

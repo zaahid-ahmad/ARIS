@@ -65,9 +65,6 @@
     [SupplyParameterFromForm]
     private InputModel Input { get; set; } = default!;
 
-    [SupplyParameterFromQuery]
-    private string? ReturnUrl { get; set; }
-
     protected override async Task OnInitializedAsync()
     {
         Input ??= new();
@@ -138,15 +135,14 @@
             {
                 Logger.LogInformation("User logged in.");
 
-                var safeReturnUrl = !string.IsNullOrEmpty(ReturnUrl) && await IsReturnUrlAllowedAsync(user, ReturnUrl);
-                RedirectManager.RedirectTo(safeReturnUrl ? ReturnUrl! : "/");
+                // Always land on the dashboard — never honor a leftover ReturnUrl from
+                // wherever the user was before signing in.
+                RedirectManager.RedirectTo("/");
             }
             else if (result.RequiresTwoFactor)
             {
-                var safeReturnUrl = !string.IsNullOrEmpty(ReturnUrl) && await IsReturnUrlAllowedAsync(user, ReturnUrl);
                 RedirectManager.RedirectTo("Account/LoginWith2fa", new Dictionary<string, object?>
                 {
-                    ["ReturnUrl"] = safeReturnUrl ? ReturnUrl : "/",
                     ["RememberMe"] = false
                 });
             }
@@ -160,35 +156,6 @@
             Logger.LogError(ex, "Login error");
             errorMessage = "An error occurred during login. Please try again.";
         }
-    }
-
-    // Maps role-scoped route prefixes to the role required to access them, so a
-    // ReturnUrl left over from a *different* user's session (e.g. captured when
-    // they were signed out of a role-restricted page) can't be blindly honored
-    // for whoever logs in next.
-    private static readonly (string Prefix, string Role)[] RoleScopedPrefixes =
-    [
-        ("/superadmin", "SuperAdmin"),
-        ("/admin", "Admin"),
-        ("/teacher", "Teacher"),
-        ("/learner", "Learner"),
-    ];
-
-    private async Task<bool> IsReturnUrlAllowedAsync(User user, string returnUrl)
-    {
-        var path = Uri.TryCreate(returnUrl, UriKind.Absolute, out var absolute)
-            ? absolute.AbsolutePath
-            : returnUrl;
-
-        foreach (var (prefix, role) in RoleScopedPrefixes)
-        {
-            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return await UserManager.IsInRoleAsync(user, role);
-            }
-        }
-
-        return true;
     }
 
     private sealed class InputModel

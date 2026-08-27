@@ -40,9 +40,6 @@
     [SupplyParameterFromForm]
     private InputModel Input { get; set; } = default!;
 
-    [SupplyParameterFromQuery]
-    private string? ReturnUrl { get; set; }
-
     protected override async Task OnInitializedAsync()
     {
         Input ??= new();
@@ -63,7 +60,8 @@
         if (result.Succeeded)
         {
             Logger.LogInformation("User with ID '{UserId}' logged in with a recovery code.", userId);
-            RedirectManager.RedirectTo(ReturnUrl);
+            // Always land on the dashboard — never honor a leftover ReturnUrl.
+            RedirectManager.RedirectTo("/");
         }
         else if (result.IsLockedOut)
         {
