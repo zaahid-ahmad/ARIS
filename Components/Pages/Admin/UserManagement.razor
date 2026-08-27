@@ -52,6 +52,7 @@ else
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Grade</th>
                 <th>Class</th>
                 <th>Active</th>
                 <th>Actions</th>
@@ -66,6 +67,7 @@ else
                     <td>@user.Fullname</td>
                     <td>@user.Email</td>
                     <td>@(userRoles.TryGetValue(user.Id, out var role) ? role : "-")</td>
+                    <td>@(learner != null ? learner.Grade.ToString() : "-")</td>
                     <td>@(learner != null ? learner.Class?.Name : "-")</td>
                     <td>@(user.IsActive ? "Yes" : "No")</td>
                     <td>
