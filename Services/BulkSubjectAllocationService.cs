@@ -26,12 +26,11 @@ namespace ARIS1.Services
 
         public async Task<List<string>> GetClassNamesAsync(int schoolId, int grade)
         {
-            return await _dbContext.Learners
+            return await _dbContext.SchoolClasses
                 .AsNoTracking()
-                .Where(l => l.Grade == grade && l.User.SchoolId == schoolId)
-                .Select(l => l.ClassName)
-                .Distinct()
-                .OrderBy(c => c)
+                .Where(c => c.SchoolId == schoolId && c.Grade == grade)
+                .OrderBy(c => c.Name)
+                .Select(c => c.Name)
                 .ToListAsync();
         }
 
@@ -107,7 +106,7 @@ namespace ARIS1.Services
 
             var learners = await _dbContext.Learners
                 .Include(l => l.User)
-                .Where(l => l.Grade == grade && l.ClassName == className && l.User.SchoolId == schoolId)
+                .Where(l => l.Grade == grade && l.Class.Name == className && l.User.SchoolId == schoolId)
                 .OrderBy(l => l.User.Fullname)
                 .ToListAsync();
 

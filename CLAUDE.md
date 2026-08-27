@@ -56,6 +56,10 @@ Pages live under `Components/Pages/` organized by role:
 
 Each page uses `@attribute [Authorize(Roles = "...")]` to restrict access. The three `Parent/` per-child pages additionally re-check `HasAccessToLearner` inside `OnParametersSetAsync` (not `OnInitializedAsync`) so that a route-parameter change on an already-live component instance re-validates ownership rather than trusting whatever check ran when the component was first constructed.
 
+### Classes
+
+`SchoolClass` (`SchoolId` + `Grade` + `Name`, unique together) is the admin-managed list of classes a learner can belong to, set up under `/admin/classes` (nested by Grade 10/11/12). `Learner.ClassId` is a required FK to it — `CreateUser.razor` and `UserManagement.razor`'s Edit Class modal both present it as a Grade-then-Class dropdown pair rather than free text, and `BulkUserImportService` resolves a CSV's `ClassName` text column against existing classes (accepting both the short form, e.g. `"A"`, and the legacy long form, e.g. `"10A"`) rather than creating one on the fly — the class must already exist. Deleting a class with learners still assigned is blocked (`DeleteBehavior.Restrict`).
+
 ### Data Flow for Assessments & Marks
 
 1. Admin creates `Subject` → Teacher creates `AssessmentType` (e.g. "SBA", "Exam") → Teacher creates `Assessment` (linked to type + term)

@@ -9,7 +9,8 @@ namespace ARIS1.Models
         public string UserId { get; set; } = string.Empty;
         public User User { get; set; } = null!;
         public int Grade { get; set; } // 10, 11, or 12
-        public string ClassName { get; set; } = string.Empty; // e.g. "10A"
+        public int ClassId { get; set; }
+        public SchoolClass Class { get; set; } = null!;
         public int EnrollmentYear { get; set; }
 
         public ICollection<LearnerSubject> LearnerSubjects { get; set; } = new List<LearnerSubject>();

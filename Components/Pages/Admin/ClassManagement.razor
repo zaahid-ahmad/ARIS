@@ -1,0 +1,337 @@
+@page "/admin/classes"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<h2>Class Management</h2>
+<p class="text-muted">Set up the classes learners can be assigned to, per grade.</p>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (classesByGrade == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    @foreach (var grade in Grades)
+    {
+        var gradeClasses = classesByGrade.GetValueOrDefault(grade, new List<SchoolClass>());
+        <div class="card mb-3">
+            <div class="card-header"><h5 class="mb-0">Grade @grade</h5></div>
+            <div class="card-body">
+                @if (gradeClasses.Count == 0)
+                {
+                    <p class="text-muted">No classes yet.</p>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Class</th>
+                                <th>Learners</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var cls in gradeClasses)
+                            {
+                                <tr>
+                                    <td style="width: 200px;">
+                                        @if (editingClassId == cls.ClassId)
+                                        {
+                                            <input class="form-control form-control-sm" maxlength="20" @bind="editingName" @bind:event="oninput" />
+                                        }
+                                        else
+                                        {
+                                            @cls.Name
+                                        }
+                                    </td>
+                                    <td>@learnerCountByClassId.GetValueOrDefault(cls.ClassId, 0)</td>
+                                    <td>
+                                        @if (editingClassId == cls.ClassId)
+                                        {
+                                            <button class="btn btn-sm btn-primary" disabled="@isProcessing" @onclick="() => SaveEdit(cls.ClassId)">Save</button>
+                                            <button class="btn btn-sm btn-secondary ms-1" @onclick="CancelEdit">Cancel</button>
+                                        }
+                                        else if (confirmDeleteId == cls.ClassId)
+                                        {
+                                            <span class="text-danger small me-2">Delete this class?</span>
+                                            <button class="btn btn-sm btn-danger" disabled="@isProcessing" @onclick="() => ConfirmDelete(cls.ClassId)">Yes, delete</button>
+                                            <button class="btn btn-sm btn-secondary ms-1" @onclick="CancelDelete">Cancel</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => StartEdit(cls)">Rename</button>
+                                            <button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => RequestDelete(cls.ClassId)">Delete</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+
+                <div class="d-flex gap-2 mt-2 align-items-start">
+                    <div>
+                        <input class="form-control form-control-sm @(addErrorByGrade.GetValueOrDefault(grade) != null ? "is-invalid" : "")"
+                               style="width: 160px;" maxlength="20" placeholder="e.g. A"
+                               @bind:get="GetNewClassName(grade)" @bind:set="(v) => SetNewClassName(grade, v)"
+                               @bind:event="oninput" />
+                        @if (addErrorByGrade.GetValueOrDefault(grade) is string err)
+                        {
+                            <div class="invalid-feedback d-block">@err</div>
+                        }
+                    </div>
+                    <button class="btn btn-sm btn-primary" disabled="@isProcessing" @onclick="() => AddClass(grade)">+ Add Class</button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private static readonly int[] Grades = { 10, 11, 12 };
+
+    private Dictionary<int, List<SchoolClass>>? classesByGrade;
+    private Dictionary<int, int> learnerCountByClassId = new();
+    private Dictionary<int, string?> addErrorByGrade = new();
+
+    // Backing fields for the per-grade "add class" inputs. A Dictionary indexer as a @bind
+    // target does not reliably round-trip keystrokes through Blazor Server's diffing inside a
+    // @foreach — @bind:get/@bind:set against these plain fields does.
+    private string newClassName10 = string.Empty;
+    private string newClassName11 = string.Empty;
+    private string newClassName12 = string.Empty;
+
+    private string GetNewClassName(int grade) => grade switch
+    {
+        10 => newClassName10,
+        11 => newClassName11,
+        _ => newClassName12
+    };
+
+    private void SetNewClassName(int grade, string value)
+    {
+        switch (grade)
+        {
+            case 10: newClassName10 = value; break;
+            case 11: newClassName11 = value; break;
+            default: newClassName12 = value; break;
+        }
+        addErrorByGrade[grade] = null;
+    }
+
+    private int? editingClassId;
+    private string editingName = string.Empty;
+    private int? confirmDeleteId;
+    private bool isProcessing;
+
+    private int? currentSchoolId;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+        if (string.IsNullOrEmpty(userName)) return;
+
+        var currentAdmin = await UserManager.FindByNameAsync(userName);
+        currentSchoolId = currentAdmin?.SchoolId;
+
+        if (currentSchoolId == null)
+        {
+            errorMessage = "You are not assigned to a school.";
+            return;
+        }
+
+        await LoadClasses();
+    }
+
+    private async Task LoadClasses()
+    {
+        var all = await DbContext.SchoolClasses
+            .AsNoTracking()
+            .Where(c => c.SchoolId == currentSchoolId)
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+
+        classesByGrade = all.GroupBy(c => c.Grade).ToDictionary(g => g.Key, g => g.ToList());
+
+        var classIds = all.Select(c => c.ClassId).ToList();
+        var counts = await DbContext.Learners
+            .AsNoTracking()
+            .Where(l => classIds.Contains(l.ClassId))
+            .GroupBy(l => l.ClassId)
+            .Select(g => new { ClassId = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        learnerCountByClassId = counts.ToDictionary(c => c.ClassId, c => c.Count);
+    }
+
+    private async Task AddClass(int grade)
+    {
+        if (isProcessing) return;
+        isProcessing = true;
+        addErrorByGrade[grade] = null;
+        errorMessage = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            var name = GetNewClassName(grade).Trim();
+
+            if (string.IsNullOrWhiteSpace(name))
+            { addErrorByGrade[grade] = "Class name is required."; return; }
+
+            if (name.Length > 20)
+            { addErrorByGrade[grade] = "Class name must be 20 characters or fewer."; return; }
+
+            var exists = await DbContext.SchoolClasses
+                .AnyAsync(c => c.SchoolId == currentSchoolId && c.Grade == grade && c.Name.ToUpper() == name.ToUpper());
+            if (exists)
+            { addErrorByGrade[grade] = $"A class named '{name}' already exists in Grade {grade}."; return; }
+
+            DbContext.SchoolClasses.Add(new SchoolClass
+            {
+                SchoolId = currentSchoolId!.Value,
+                Grade = grade,
+                Name = name
+            });
+            await DbContext.SaveChangesAsync();
+
+            SetNewClassName(grade, string.Empty);
+            successMessage = $"Class '{name}' created under Grade {grade}.";
+            await LoadClasses();
+        }
+        catch (Exception ex)
+        {
+            addErrorByGrade[grade] = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private void StartEdit(SchoolClass cls)
+    {
+        editingClassId = cls.ClassId;
+        editingName = cls.Name;
+        confirmDeleteId = null;
+        errorMessage = string.Empty;
+    }
+
+    private void CancelEdit()
+    {
+        editingClassId = null;
+        editingName = string.Empty;
+    }
+
+    private async Task SaveEdit(int classId)
+    {
+        if (isProcessing) return;
+        isProcessing = true;
+        errorMessage = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            var name = editingName.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            { errorMessage = "Class name is required."; return; }
+
+            var cls = await DbContext.SchoolClasses.FindAsync(classId);
+            if (cls == null)
+            { errorMessage = "Class no longer exists."; CancelEdit(); await LoadClasses(); return; }
+
+            var duplicate = await DbContext.SchoolClasses
+                .AnyAsync(c => c.ClassId != classId && c.SchoolId == cls.SchoolId && c.Grade == cls.Grade && c.Name.ToUpper() == name.ToUpper());
+            if (duplicate)
+            { errorMessage = $"A class named '{name}' already exists in Grade {cls.Grade}."; return; }
+
+            cls.Name = name;
+            await DbContext.SaveChangesAsync();
+
+            successMessage = "Class renamed.";
+            CancelEdit();
+            await LoadClasses();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private void RequestDelete(int classId)
+    {
+        confirmDeleteId = classId;
+        editingClassId = null;
+        errorMessage = string.Empty;
+    }
+
+    private void CancelDelete()
+    {
+        confirmDeleteId = null;
+    }
+
+    private async Task ConfirmDelete(int classId)
+    {
+        if (isProcessing) return;
+        isProcessing = true;
+        errorMessage = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Friendly pre-check ahead of the FK's own Restrict constraint, which would
+            // otherwise surface as a raw SQL exception if a race let a learner get assigned
+            // between page load and this click.
+            if (learnerCountByClassId.GetValueOrDefault(classId, 0) > 0)
+            {
+                errorMessage = "Cannot delete a class that still has learners assigned to it. Reassign them first.";
+                confirmDeleteId = null;
+                return;
+            }
+
+            var cls = await DbContext.SchoolClasses.FindAsync(classId);
+            if (cls != null)
+            {
+                DbContext.SchoolClasses.Remove(cls);
+                await DbContext.SaveChangesAsync();
+                successMessage = "Class deleted.";
+            }
+            confirmDeleteId = null;
+            await LoadClasses();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+            confirmDeleteId = null;
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+}

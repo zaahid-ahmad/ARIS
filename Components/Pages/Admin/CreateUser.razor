@@ -74,7 +74,7 @@
             <div class="mb-3">
                 <label class="form-label">Grade <span class="text-danger">*</span></label>
                 <select class="form-control @(gradeError != null ? "is-invalid" : "")"
-                        @bind="grade" @bind:after="@(() => gradeError = null)">
+                        @bind="grade" @bind:after="OnGradeChanged">
                     <option value="10">Grade 10</option>
                     <option value="11">Grade 11</option>
                     <option value="12">Grade 12</option>
@@ -86,12 +86,21 @@
             </div>
             <div class="mb-3">
                 <label class="form-label">Class <span class="text-danger">*</span></label>
-                <input class="form-control @(classNameError != null ? "is-invalid" : "")"
-                       @bind="className" @oninput="@(() => classNameError = null)"
-                       maxlength="20" placeholder="e.g. 10A" />
-                @if (classNameError != null)
+                <select class="form-control @(classIdError != null ? "is-invalid" : "")"
+                        @bind="selectedClassId" @bind:after="@(() => classIdError = null)">
+                    <option value="0">-- Select Class --</option>
+                    @foreach (var cls in gradeClasses)
+                    {
+                        <option value="@cls.ClassId">@cls.Name</option>
+                    }
+                </select>
+                @if (classIdError != null)
                 {
-                    <div class="invalid-feedback">@classNameError</div>
+                    <div class="invalid-feedback">@classIdError</div>
+                }
+                @if (gradeClasses.Count == 0)
+                {
+                    <small class="text-muted">No classes exist for Grade @grade yet — create one under <a href="/admin/classes">Class Management</a> first.</small>
                 }
             </div>
         }
@@ -116,7 +125,7 @@
                                        checked="@selectedLearnerIds.Contains(learner.LearnerId)"
                                        @onchange="@((e) => ToggleLearnerSelection(learner.LearnerId, (bool)e.Value!))" />
                                 <label class="form-check-label">
-                                    @learner.User?.Fullname (Grade @learner.Grade — @learner.ClassName)
+                                    @learner.User?.Fullname (Grade @learner.Grade — @learner.Class?.Name)
                                 </label>
                             </div>
                         }
@@ -143,7 +152,8 @@
     private string password = string.Empty;
     private string role = string.Empty;
     private string grade = "10";
-    private string className = string.Empty;
+    private int selectedClassId = 0;
+    private List<SchoolClass> gradeClasses = new();
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
 
@@ -152,7 +162,7 @@
     private string? passwordError;
     private string? roleError;
     private string? gradeError;
-    private string? classNameError;
+    private string? classIdError;
     private string? childrenError;
 
     private int? currentAdminSchoolId;
@@ -187,15 +197,36 @@
             schoolLearners = await DbContext.Learners
                 .AsNoTracking()
                 .Include(l => l.User)
+                .Include(l => l.Class)
                 .Where(l => l.User!.SchoolId == currentAdminSchoolId)
                 .OrderBy(l => l.User!.Fullname)
                 .ToListAsync();
+
+            await LoadGradeClasses();
         }
+    }
+
+    private async Task OnGradeChanged()
+    {
+        gradeError = null;
+        selectedClassId = 0;
+        await LoadGradeClasses();
+    }
+
+    private async Task LoadGradeClasses()
+    {
+        if (currentAdminSchoolId == null || !int.TryParse(grade, out var gradeValue)) return;
+
+        gradeClasses = await DbContext.SchoolClasses
+            .AsNoTracking()
+            .Where(c => c.SchoolId == currentAdminSchoolId && c.Grade == gradeValue)
+            .OrderBy(c => c.Name)
+            .ToListAsync();
     }
 
     private bool ValidateForm()
     {
-        fullNameError = emailError = passwordError = roleError = gradeError = classNameError = childrenError = null;
+        fullNameError = emailError = passwordError = roleError = gradeError = classIdError = childrenError = null;
         var valid = true;
 
         if (string.IsNullOrWhiteSpace(fullName))
@@ -221,26 +252,13 @@
         if (role == "Learner" && string.IsNullOrWhiteSpace(grade))
         { gradeError = "Please select a grade."; valid = false; }
 
-        if (role == "Learner")
-        {
-            if (string.IsNullOrWhiteSpace(className))
-            { classNameError = "Please enter a class."; valid = false; }
-            else if (!IsValidClassName(className, grade))
-            { classNameError = $"Class must be grade {grade} followed by a single letter, e.g. {grade}A."; valid = false; }
-        }
+        if (role == "Learner" && selectedClassId == 0)
+        { classIdError = "Please select a class."; valid = false; }
 
         if (role == "Parent" && selectedLearnerIds.Count == 0)
         { childrenError = "Select at least one learner to link to this parent account."; valid = false; }
 
         return valid;
-    }
-
-    private static bool IsValidClassName(string value, string gradeDigits)
-    {
-        var v = value.Trim().ToUpperInvariant();
-        return v.Length == gradeDigits.Length + 1
-            && v.StartsWith(gradeDigits, StringComparison.Ordinal)
-            && v[^1] >= 'A' && v[^1] <= 'Z';
     }
 
     private async Task CreateUserAsync()
@@ -262,6 +280,21 @@
         var existingUser = await UserManager.FindByEmailAsync(email);
         if (existingUser != null)
         { emailError = "This email is already in use."; return; }
+
+        // Server-side re-validation: never trust the client-side selection alone — the
+        // selected class must actually belong to this admin's own school and grade.
+        if (role == "Learner")
+        {
+            var gradeValue = int.Parse(grade);
+            var classValid = await DbContext.SchoolClasses
+                .AnyAsync(c => c.ClassId == selectedClassId && c.SchoolId == currentAdmin.SchoolId && c.Grade == gradeValue);
+
+            if (!classValid)
+            {
+                classIdError = "That class is no longer valid. Please refresh and try again.";
+                return;
+            }
+        }
 
         // Server-side re-validation: never trust the client-side selection alone — every
         // selected learner must actually belong to this admin's own school.
@@ -310,7 +343,7 @@
                     {
                         UserId = user.Id,
                         Grade = int.Parse(grade),
-                        ClassName = className.Trim().ToUpperInvariant(),
+                        ClassId = selectedClassId,
                         EnrollmentYear = DateTime.Now.Year
                     };
                     DbContext.Learners.Add(learner);
@@ -335,7 +368,7 @@
                 password = string.Empty;
                 role = string.Empty;
                 grade = "10";
-                className = string.Empty;
+                selectedClassId = 0;
                 selectedLearnerIds.Clear();
                 learnerSearchTerm = string.Empty;
 

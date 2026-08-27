@@ -73,7 +73,7 @@ else
                         <td>
                             <span class="badge bg-info">Grade @learner.Grade</span>
                         </td>
-                        <td>@learner.ClassName</td>
+                        <td>@learner.Class?.Name</td>
                         <td>@subjectCount subject(s)</td>
                         <td>
                             <button class="btn btn-primary btn-sm"
@@ -98,7 +98,7 @@ else
                 <div class="modal-header">
                     <div>
                         <h5 class="modal-title">@selectedLearner.User?.Fullname</h5>
-                        <small class="text-muted">Grade @selectedLearner.Grade • @selectedLearner.ClassName</small>
+                        <small class="text-muted">Grade @selectedLearner.Grade • @selectedLearner.Class?.Name</small>
                     </div>
                     <button type="button" class="btn-close" @onclick="() => selectedLearner = null"></button>
                 </div>
@@ -295,6 +295,7 @@ else
                 allLearners = await DbContext.Learners
                     .AsNoTracking()
                     .Include(l => l.User)
+                    .Include(l => l.Class)
                     .Where(l => l.User.SchoolId == currentSchoolId)
                     .ToListAsync();
             }
@@ -324,6 +325,8 @@ else
                     .Where(ls => ls.Subject.TeacherId == currentTeacher.TeacherId && ls.Subject.SchoolId == currentSchoolId)
                     .Include(ls => ls.Learner)
                     .ThenInclude(l => l.User)
+                    .Include(ls => ls.Learner)
+                    .ThenInclude(l => l.Class)
                     .Select(ls => ls.Learner)
                     .Distinct()
                     .ToListAsync();

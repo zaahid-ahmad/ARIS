@@ -66,13 +66,13 @@ else
                     <td>@user.Fullname</td>
                     <td>@user.Email</td>
                     <td>@(userRoles.TryGetValue(user.Id, out var role) ? role : "-")</td>
-                    <td>@(learner != null ? learner.ClassName : "-")</td>
+                    <td>@(learner != null ? learner.Class?.Name : "-")</td>
                     <td>@(user.IsActive ? "Yes" : "No")</td>
                     <td>
                         @if (learner != null)
                         {
                             <button class="btn btn-info btn-sm ms-1"
-                                    @onclick="() => ShowEditClass(learner.LearnerId, user.Fullname, learner.Grade, learner.ClassName)">
+                                    @onclick="() => ShowEditClass(learner.LearnerId, user.Fullname, learner.Grade, learner.ClassId)">
                                 Edit Class
                             </button>
                         }
@@ -192,12 +192,21 @@ else
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label">Class <span class="text-danger">*</span></label>
-                        <input class="form-control @(classNameEditError != null ? "is-invalid" : "")"
-                               @bind="editClassName" @oninput="@(() => classNameEditError = null)"
-                               maxlength="20" placeholder="e.g. @(learnerToEditGrade)A" />
+                        <select class="form-control @(classNameEditError != null ? "is-invalid" : "")"
+                                @bind="editClassId" @bind:after="@(() => classNameEditError = null)">
+                            <option value="0">-- Select Class --</option>
+                            @foreach (var cls in editGradeClasses)
+                            {
+                                <option value="@cls.ClassId">@cls.Name</option>
+                            }
+                        </select>
                         @if (classNameEditError != null)
                         {
                             <div class="invalid-feedback">@classNameEditError</div>
+                        }
+                        @if (editGradeClasses.Count == 0)
+                        {
+                            <small class="text-muted">No classes exist for Grade @learnerToEditGrade yet — create one under <a href="/admin/classes">Class Management</a> first.</small>
                         }
                     </div>
                 </div>
@@ -241,7 +250,7 @@ else
                             @foreach (var child in linkedChildren)
                             {
                                 <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    @child.User.Fullname (Grade @child.Grade — @child.ClassName)
+                                    @child.User.Fullname (Grade @child.Grade — @child.Class?.Name)
                                     <button class="btn btn-outline-danger btn-sm"
                                             @onclick="() => RemoveChild(child.LearnerId)"
                                             disabled="@isMutatingChildren">
@@ -277,7 +286,7 @@ else
                                 @foreach (var candidate in childSearchResults)
                                 {
                                     <li class="list-group-item d-flex justify-content-between align-items-center">
-                                        @candidate.User.Fullname (Grade @candidate.Grade — @candidate.ClassName)
+                                        @candidate.User.Fullname (Grade @candidate.Grade — @candidate.Class?.Name)
                                         <button class="btn btn-outline-success btn-sm"
                                                 @onclick="() => AddChild(candidate.LearnerId)"
                                                 disabled="@isMutatingChildren">
@@ -425,7 +434,8 @@ else
     private int? learnerToEditId;
     private string learnerToEditName = string.Empty;
     private int learnerToEditGrade;
-    private string editClassName = string.Empty;
+    private int editClassId;
+    private List<SchoolClass> editGradeClasses = new();
     private string? classNameEditError;
 
     private bool showImportModal = false;
@@ -502,6 +512,7 @@ else
             );
 
             learnerByUserId = await DbContext.Learners
+                .Include(l => l.Class)
                 .Where(l => userIds.Contains(l.UserId))
                 .ToDictionaryAsync(l => l.UserId);
 
@@ -639,44 +650,44 @@ else
         revealNewPassword = false;
     }
 
-    private void ShowEditClass(int learnerId, string fullname, int grade, string currentClassName)
+    private async Task ShowEditClass(int learnerId, string fullname, int grade, int currentClassId)
     {
         learnerToEditId = learnerId;
         learnerToEditName = fullname;
         learnerToEditGrade = grade;
-        editClassName = currentClassName;
+        editClassId = currentClassId;
         classNameEditError = null;
-    }
 
-    private static bool IsValidClassName(string value, int grade)
-    {
-        var gradeDigits = grade.ToString();
-        var v = value.Trim().ToUpperInvariant();
-        return v.Length == gradeDigits.Length + 1
-            && v.StartsWith(gradeDigits, StringComparison.Ordinal)
-            && v[^1] >= 'A' && v[^1] <= 'Z';
+        editGradeClasses = await DbContext.SchoolClasses
+            .AsNoTracking()
+            .Where(c => c.SchoolId == currentSchoolId && c.Grade == grade)
+            .OrderBy(c => c.Name)
+            .ToListAsync();
     }
 
     private async Task ConfirmEditClass()
     {
         if (learnerToEditId == null) return;
 
-        if (string.IsNullOrWhiteSpace(editClassName))
-        { classNameEditError = "Class is required."; return; }
-
-        if (!IsValidClassName(editClassName, learnerToEditGrade))
-        { classNameEditError = $"Class must be grade {learnerToEditGrade} followed by a single letter, e.g. {learnerToEditGrade}A."; return; }
+        if (editClassId == 0)
+        { classNameEditError = "Please select a class."; return; }
 
         try
         {
+            // Re-validate server-side rather than trusting the dropdown's client-side state.
+            var classValid = await DbContext.SchoolClasses
+                .AnyAsync(c => c.ClassId == editClassId && c.SchoolId == currentSchoolId && c.Grade == learnerToEditGrade);
+            if (!classValid)
+            { classNameEditError = "That class is no longer valid. Please refresh and try again."; return; }
+
             var learner = await DbContext.Learners.FindAsync(learnerToEditId);
             if (learner == null)
             { classNameEditError = "Learner no longer exists."; return; }
 
-            learner.ClassName = editClassName.Trim().ToUpperInvariant();
+            learner.ClassId = editClassId;
             await DbContext.SaveChangesAsync();
 
-            successMessage = $"Class updated to {learner.ClassName}.";
+            successMessage = "Class updated.";
             CancelEditClass();
             await LoadUsers();
         }
@@ -691,7 +702,8 @@ else
         learnerToEditId = null;
         learnerToEditName = string.Empty;
         learnerToEditGrade = 0;
-        editClassName = string.Empty;
+        editClassId = 0;
+        editGradeClasses = new();
         classNameEditError = null;
     }
 
@@ -715,6 +727,7 @@ else
                 .AsNoTracking()
                 .Where(pl => pl.ParentId == parentId)
                 .Include(pl => pl.Learner).ThenInclude(l => l.User)
+                .Include(pl => pl.Learner).ThenInclude(l => l.Class)
                 .Select(pl => pl.Learner)
                 .ToListAsync();
         }
@@ -744,6 +757,7 @@ else
             var query = DbContext.Learners
                 .AsNoTracking()
                 .Include(l => l.User)
+                .Include(l => l.Class)
                 .Where(l => l.User.SchoolId == currentSchoolId && !linkedIds.Contains(l.LearnerId));
 
             if (!string.IsNullOrWhiteSpace(childSearchTerm))

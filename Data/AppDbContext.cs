@@ -14,6 +14,7 @@ namespace ARIS1.Data
         public DbSet<School> Schools { get; set; }
 
         public DbSet<Learner> Learners { get; set; }
+        public DbSet<SchoolClass> SchoolClasses { get; set; }
         public DbSet<Teacher> Teachers { get; set; }
         public DbSet<Parent> Parents { get; set; }
         public DbSet<ParentLearner> ParentLearners { get; set; }
@@ -70,6 +71,26 @@ namespace ARIS1.Data
                 .HasOne(l => l.User)
                 .WithOne()
                 .HasForeignKey<Learner>(l => l.UserId);
+
+            // SchoolClass relationships
+            builder.Entity<SchoolClass>()
+                .HasKey(c => c.ClassId);
+
+            builder.Entity<SchoolClass>()
+                .HasOne(c => c.School)
+                .WithMany()
+                .HasForeignKey(c => c.SchoolId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<SchoolClass>()
+                .HasIndex(c => new { c.SchoolId, c.Grade, c.Name })
+                .IsUnique();
+
+            builder.Entity<Learner>()
+                .HasOne(l => l.Class)
+                .WithMany(c => c.Learners)
+                .HasForeignKey(l => l.ClassId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             // Teacher relationships
             builder.Entity<Teacher>()

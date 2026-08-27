@@ -22,7 +22,7 @@
         <h4>Personal Information</h4>
         <p><strong>Name:</strong> @currentLearner?.User?.Fullname</p>
         <p><strong>Grade:</strong> @currentLearner?.Grade</p>
-        <p><strong>Class:</strong> @currentLearner?.ClassName</p>
+        <p><strong>Class:</strong> @currentLearner?.Class?.Name</p>
     </div>
 </div>
 <hr />
@@ -134,6 +134,7 @@ else
             currentLearner = await DbContext.Learners
                 .AsNoTracking()
                 .Include(l => l.User)
+                .Include(l => l.Class)
                 .FirstOrDefaultAsync(l => l.UserId == user!.Id);
 
             if (currentLearner == null)

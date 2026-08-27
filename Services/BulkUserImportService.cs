@@ -5,6 +5,7 @@ using ARIS1.Models;
 using ClosedXML.Excel;
 using CsvHelper;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace ARIS1.Services
 {
@@ -108,6 +109,19 @@ namespace ARIS1.Services
                 seenEmails.Add(email);
                 var normalizedRole = string.Equals(role, "Teacher", StringComparison.OrdinalIgnoreCase) ? "Teacher" : "Learner";
 
+                SchoolClass? matchedClass = null;
+                if (normalizedRole == "Learner")
+                {
+                    var gradeValue = int.Parse(gradeRaw);
+                    matchedClass = await ResolveClassAsync(schoolId, gradeValue, className);
+                    if (matchedClass == null)
+                    {
+                        results.Add(new ImportRowResult(rowNumber, fullName, email, normalizedRole, false,
+                            $"No class '{className}' exists for Grade {gradeValue} at this school. Create it under Class Management first.", null));
+                        continue;
+                    }
+                }
+
                 var existingUser = await _userManager.FindByEmailAsync(email);
                 if (existingUser != null)
                 {
@@ -150,7 +164,7 @@ namespace ARIS1.Services
                         {
                             UserId = user.Id,
                             Grade = int.Parse(gradeRaw),
-                            ClassName = className.ToUpperInvariant(),
+                            ClassId = matchedClass!.ClassId,
                             EnrollmentYear = DateTime.Now.Year
                         });
                     }
@@ -189,20 +203,32 @@ namespace ARIS1.Services
                 if (!int.TryParse(gradeRaw, out var grade) || grade < 10 || grade > 12)
                     return "Grade must be 10, 11, or 12 for learners.";
 
-                if (string.IsNullOrWhiteSpace(className) || !IsValidClassName(className, gradeRaw))
-                    return $"Class must be grade {gradeRaw} followed by a single letter, e.g. {gradeRaw}A.";
+                if (string.IsNullOrWhiteSpace(className))
+                    return "ClassName is required for learners.";
             }
 
             return null;
         }
 
-        private static bool IsValidClassName(string value, string gradeDigits)
+        // Tolerates both the short form ("A") and the legacy long form ("10A") for the class
+        // name in the CSV, since existing spreadsheets from before this feature used the latter.
+        private async Task<SchoolClass?> ResolveClassAsync(int schoolId, int grade, string className)
         {
-            var v = value.Trim().ToUpperInvariant();
-            return v.Length == gradeDigits.Length + 1
-                && v.StartsWith(gradeDigits, StringComparison.Ordinal)
-                && v[^1] >= 'A' && v[^1] <= 'Z';
-        }
+            var name = className.Trim();
+            var gradeDigits = grade.ToString();
 
+            var match = await _dbContext.SchoolClasses
+                .FirstOrDefaultAsync(c => c.SchoolId == schoolId && c.Grade == grade && c.Name.ToUpper() == name.ToUpper());
+            if (match != null) return match;
+
+            if (name.StartsWith(gradeDigits, StringComparison.OrdinalIgnoreCase) && name.Length > gradeDigits.Length)
+            {
+                var shortName = name.Substring(gradeDigits.Length);
+                match = await _dbContext.SchoolClasses
+                    .FirstOrDefaultAsync(c => c.SchoolId == schoolId && c.Grade == grade && c.Name.ToUpper() == shortName.ToUpper());
+            }
+
+            return match;
+        }
     }
 }
