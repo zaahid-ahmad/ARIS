@@ -15,6 +15,8 @@ namespace ARIS1.Data
 
         public DbSet<Learner> Learners { get; set; }
         public DbSet<Teacher> Teachers { get; set; }
+        public DbSet<Parent> Parents { get; set; }
+        public DbSet<ParentLearner> ParentLearners { get; set; }
         public DbSet<Subject> Subjects { get; set; }
         public DbSet<LearnerSubject> LearnerSubjects { get; set; }
         public DbSet<AssessmentType> AssessmentTypes { get; set; }
@@ -74,6 +76,28 @@ namespace ARIS1.Data
                 .HasOne(t => t.User)
                 .WithOne()
                 .HasForeignKey<Teacher>(t => t.UserId);
+
+            // Parent relationships (mirrors Teacher's 1:1 User link)
+            builder.Entity<Parent>()
+                .HasOne(p => p.User)
+                .WithOne()
+                .HasForeignKey<Parent>(p => p.UserId);
+
+            // ParentLearner composite primary key (mirrors LearnerSubject)
+            builder.Entity<ParentLearner>()
+                .HasKey(pl => new { pl.ParentId, pl.LearnerId });
+
+            builder.Entity<ParentLearner>()
+                .HasOne(pl => pl.Parent)
+                .WithMany(p => p.Children)
+                .HasForeignKey(pl => pl.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<ParentLearner>()
+                .HasOne(pl => pl.Learner)
+                .WithMany(l => l.Guardians)
+                .HasForeignKey(pl => pl.LearnerId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             // AttendanceRecord primary key
             builder.Entity<AttendanceRecord>()

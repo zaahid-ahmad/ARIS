@@ -15,5 +15,6 @@ namespace ARIS1.Models
         public ICollection<LearnerSubject> LearnerSubjects { get; set; } = new List<LearnerSubject>();
         public ICollection<LearnerMark> LearnerMarks { get; set; } = new List<LearnerMark>();
         public ICollection<AttendanceRecord> AttendanceRecords { get; set; } = new List<AttendanceRecord>();
+        public ICollection<ParentLearner> Guardians { get; set; } = new List<ParentLearner>();
     }
 }

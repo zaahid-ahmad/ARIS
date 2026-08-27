@@ -1,6 +1,7 @@
 ﻿using ARIS1.Models;
 using ARIS1.Data;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace ARIS1.Services
 {
@@ -59,6 +60,53 @@ namespace ARIS1.Services
                 return false;
 
             return await HasAccessToSchool(userName, subject.SchoolId);
+        }
+
+        /// <summary>
+        /// Returns the LearnerIds this parent is linked to, via the ParentLearner table.
+        /// Empty list if the user isn't found, isn't in the Parent role, or has no linked
+        /// children — never throws.
+        /// </summary>
+        public async Task<List<int>> GetAccessibleLearnerIds(string? userName)
+        {
+            if (string.IsNullOrEmpty(userName))
+                return new List<int>();
+
+            var user = await _userManager.FindByNameAsync(userName);
+            if (user == null)
+                return new List<int>();
+
+            // Defense in depth: every Parent-facing page will also be gated by
+            // [Authorize(Roles = "Parent")], but don't let a stale Parent/ParentLearner
+            // row grant access if this user's role assignment has since changed.
+            if (!await _userManager.IsInRoleAsync(user, "Parent"))
+                return new List<int>();
+
+            var parent = await _context.Parents
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UserId == user.Id);
+
+            if (parent == null)
+                return new List<int>();
+
+            return await _context.ParentLearners
+                .AsNoTracking()
+                .Where(pl => pl.ParentId == parent.ParentId)
+                .Select(pl => pl.LearnerId)
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Validates that the given user (must be in the Parent role) is linked to the specific
+        /// learner via the ParentLearner table. Deny-by-default. This is a resource-level check
+        /// and does not replace [Authorize(Roles = "Parent")] on the page — both are required
+        /// together, the same way HasAccessToSubject is used alongside role attributes elsewhere
+        /// in this codebase.
+        /// </summary>
+        public async Task<bool> HasAccessToLearner(string? userName, int learnerId)
+        {
+            var accessibleIds = await GetAccessibleLearnerIds(userName);
+            return accessibleIds.Contains(learnerId);
         }
     }
 }

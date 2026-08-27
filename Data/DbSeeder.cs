@@ -16,7 +16,7 @@ namespace ARIS1.Data
             bool isDevelopment = env.IsDevelopment();
 
             // Create roles if they don't exist
-            string[] roles = { "SuperAdmin", "Admin", "Teacher", "Learner" };
+            string[] roles = { "SuperAdmin", "Admin", "Teacher", "Learner", "Parent" };
             foreach (var role in roles)
             {
                 if (!await roleManager.RoleExistsAsync(role))
