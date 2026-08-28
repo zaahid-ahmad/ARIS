@@ -9,10 +9,12 @@
 ## Overview
 
 ARIS is a school management and academic-risk platform built with Blazor Server
-(.NET 10). It supports multiple schools (multi-tenancy) and four user roles —
-SuperAdmin, Admin, Teacher, and Learner — covering user management, subject and
-assessment setup, learner enrollment, mark capture, weighted score calculation,
-and automatic flagging of learners who need intervention.
+(.NET 10). It supports multiple schools (multi-tenancy) and five user roles —
+SuperAdmin, Admin, Teacher, Learner, and Parent — covering user management,
+subject and assessment setup, class management, learner enrollment, mark
+capture, weighted score calculation, automatic flagging of learners who need
+intervention, and a read-only portal for parents to view their own children's
+progress.
 
 ---
 
@@ -48,8 +50,9 @@ connection string to change. The app builds the database via Entity Framework
 Core migrations and seeds the default roles, a default school, and the login
 accounts below.
 
-The app opens in your browser at the address shown in the launch window
-(typically `https://localhost:xxxx`).
+The app opens in your browser automatically, at
+`https://aris1.dev.localhost:7124` (see the note on this custom hostname under
+Troubleshooting below if it doesn't load).
 
 ---
 
@@ -63,10 +66,11 @@ The following accounts are created automatically on first run:
 | Admin      | admin@aris.com          | Admin@1234        | DEFAULT		|
 
 - **SuperAdmin** manages schools and creates school administrators.
-- **Admin** manages users, subjects, assessments, and enrollment within their
-  school (the seeded "Default School").
+- **Admin** manages users, subjects, classes, assessments, and enrollment
+  within their school (the seeded "Default School").
 
-Teacher and Learner accounts are created from within the app by an Admin.
+Teacher, Learner, and Parent accounts are created from within the app by an
+Admin — either one at a time, or in bulk via CSV/Excel import.
 
 ---
 
@@ -89,3 +93,18 @@ Teacher and Learner accounts are created from within the app by an Admin.
 - **The database does not need to be created manually.** If you previously ran the
   app and want a clean database, it can be dropped and it will be recreated and
   reseeded on the next launch.
+- **The app fails to start, or the browser can't reach the page, because of the
+  hostname** — the launch profiles use `aris1.dev.localhost` instead of plain
+  `localhost` (so multiple projects on this machine can each have their own
+  cookie-scoped address). Modern Windows and Chromium-based browsers (Edge,
+  Chrome) resolve any `*.localhost` address to your own machine automatically,
+  with nothing to configure — this is how the app runs out of the box on most
+  machines. If yours doesn't (an older Windows build, or a locked-down network
+  config), you'll see either a Kestrel error on startup saying the host can't be
+  resolved, or the browser reporting it can't find the page. The fix is a single
+  line added to the hosts file at
+  `C:\Windows\System32\drivers\etc\hosts` (as Administrator):
+  ```
+  127.0.0.1 aris1.dev.localhost
+  ```
+  Save the file and press F5 again — no project changes are needed.
