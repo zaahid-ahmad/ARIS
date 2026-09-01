@@ -10,6 +10,7 @@
 @inject AppDbContext DbContext
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
+@inject ARIS1.Services.WeightCalculationService WeightCalculationService
 
 
 @if (!string.IsNullOrEmpty(errorMessage))
@@ -124,6 +125,24 @@ else
                                         var subjectMarks = assessmentMarksCache.ContainsKey(subject.SubjectId)
                                             ? assessmentMarksCache[subject.SubjectId]
                                             : new List<AssessmentMarkInfo>();
+
+                                        var markSummary = subjectMarkSummaryCache.GetValueOrDefault(subject.SubjectId);
+                                    }
+
+                                    <!-- Overall Percentage (weighted Term Marks + Year Mark) -->
+                                    @if (markSummary != null && (markSummary.TermMarks.Count > 0 || markSummary.YearMark != null))
+                                    {
+                                        <div class="mb-3 p-2 bg-light rounded">
+                                            <strong>Overall: </strong>
+                                            @foreach (var (term, pct) in markSummary.TermMarks)
+                                            {
+                                                <span class="badge bg-secondary me-1">Term @term: @pct.ToString("F1")%</span>
+                                            }
+                                            @if (markSummary.YearMark != null)
+                                            {
+                                                <span class="badge bg-primary">Year Mark: @markSummary.YearMark.YearPercentage.ToString("F1")%</span>
+                                            }
+                                        </div>
                                     }
 
                                     <!-- Assessment Marks Summary -->
@@ -263,6 +282,7 @@ else
     // Cache for marks per subject
     private Dictionary<int, List<AssessmentMarkInfo>> assessmentMarksCache = new();
     private Dictionary<int, List<Subject>> learnerSubjectsCache = new();
+    private Dictionary<int, SubjectMarkSummary> subjectMarkSummaryCache = new();
 
     private class AssessmentMarkInfo
     {
@@ -271,6 +291,14 @@ else
         public int Term { get; set; }
         public decimal MarksAwarded { get; set; }
         public decimal MaxMark { get; set; }
+    }
+
+    // Weighted Term Marks + Year Mark for one subject, via WeightCalculationService — the
+    // "overall percentage" a teacher couldn't previously see anywhere.
+    private class SubjectMarkSummary
+    {
+        public List<(int Term, decimal Percentage)> TermMarks { get; set; } = new();
+        public ARIS1.Services.YearMarkResult? YearMark { get; set; }
     }
 
     protected override async Task OnInitializedAsync()
@@ -450,9 +478,29 @@ else
                 marksCache[subject.SubjectId] = marks;
             }
 
+            var summaryCache = new Dictionary<int, SubjectMarkSummary>();
+            foreach (var subject in subjects)
+            {
+                var summary = new SubjectMarkSummary();
+
+                foreach (var term in new[] { 1, 2, 3, 4 })
+                {
+                    var termResult = await WeightCalculationService.CalculateWeightedTermMark(learner.LearnerId, subject.SubjectId, term);
+                    if (termResult.IsSuccessful)
+                        summary.TermMarks.Add((term, termResult.WeightedPercentage));
+                }
+
+                var yearResult = await WeightCalculationService.CalculateYearMark(learner.LearnerId, subject.SubjectId);
+                if (yearResult.IsSuccessful)
+                    summary.YearMark = yearResult;
+
+                summaryCache[subject.SubjectId] = summary;
+            }
+
             learnerSubjects = subjects;
             learnerInterventions = interventions;
             assessmentMarksCache = marksCache;
+            subjectMarkSummaryCache = summaryCache;
         }
         catch (Exception ex)
         {

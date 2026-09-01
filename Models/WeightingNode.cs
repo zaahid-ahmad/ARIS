@@ -25,6 +25,10 @@ namespace ARIS1.Models
         public int? AssessmentTypeId { get; set; }
         public AssessmentType? AssessmentType { get; set; }
 
+        // Which term's weighted mark this node substitutes in (if NodeType == "Term").
+        // Only meaningful on a Year-level structure (WeightingStructure.Term == 0).
+        public int? ReferencedTerm { get; set; }
+
         public DateTime CreatedDate { get; set; } = DateTime.Now;
 
         // Navigation to children

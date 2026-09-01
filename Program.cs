@@ -108,6 +108,11 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();   // build the DB on a clean machine before seeding
     await DbSeeder.SeedAsync(scope.ServiceProvider, builder.Configuration);
+
+    if (args.Contains("--seed-demo"))
+    {
+        await DemoDataSeeder.SeedAsync(scope.ServiceProvider);
+    }
 }
 
 app.Run();

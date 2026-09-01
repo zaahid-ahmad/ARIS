@@ -127,6 +127,137 @@ namespace ARIS1.Services
         }
 
         /// <summary>
+        /// Calculates a learner's year (promotion) mark for a subject from its Year-level
+        /// weighting structure (WeightingStructure.Term == 0). Built entirely out of calls to
+        /// CalculateWeightedTermMark — a "Term" node substitutes in that term's weighted mark,
+        /// an "AssessmentType" node substitutes in that single type's percentage (e.g. a Final
+        /// Exam), and "Custom" group nodes just recurse into their children. Node weightings are
+        /// relative to their parent, same convention as WeightingService's tree validation.
+        /// </summary>
+        public async Task<YearMarkResult> CalculateYearMark(int learnerId, int subjectId)
+        {
+            var result = new YearMarkResult();
+
+            try
+            {
+                var structure = await _context.WeightingStructures
+                    .AsNoTracking()
+                    .Include(ws => ws.RootNodes)
+                    .ThenInclude(n => n.ChildNodes)
+                    .FirstOrDefaultAsync(ws => ws.SubjectId == subjectId && ws.Term == 0);
+
+                // WeightingStructure.RootNodes is actually every node belonging to the structure
+                // (the collection side of the WeightingStructureId FK), not a true-roots-only
+                // filter — filter down to top-level nodes explicitly. Each node's own ChildNodes
+                // (populated above via ThenInclude, keyed off ParentNodeId) is unaffected.
+                var rootNodes = structure?.RootNodes.Where(n => n.ParentNodeId == null).ToList() ?? new List<WeightingNode>();
+
+                if (structure == null || rootNodes.Count == 0)
+                {
+                    result.Error = "No year weighting structure configured for this subject.";
+                    return result;
+                }
+
+                decimal rootTotal = rootNodes.Sum(n => n.Weighting);
+                if (Math.Abs(rootTotal - 100m) > 0.001m)
+                {
+                    result.Error = $"Year weighting nodes do not sum to 100% (Total: {rootTotal}%). Please fix the year weighting structure.";
+                    return result;
+                }
+
+                decimal yearPercentage = 0m;
+                bool hasAnyData = false;
+
+                foreach (var node in rootNodes.OrderBy(n => n.DisplayOrder))
+                {
+                    var (contribution, hasData) = await EvaluateYearNode(learnerId, subjectId, node, node.Weighting);
+                    yearPercentage += contribution;
+                    hasAnyData |= hasData;
+
+                    result.Breakdown.Add(new YearMarkBreakdown
+                    {
+                        NodeName = node.Name,
+                        Weight = node.Weighting,
+                        ContributionToYear = contribution
+                    });
+                }
+
+                result.YearPercentage = hasAnyData ? yearPercentage : 0m;
+                result.APSLevel = GetAPSLevel(subjectId, result.YearPercentage);
+                result.IsSuccessful = true;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.Error = $"Error calculating year mark: {ex.Message}";
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// Recursively evaluates one Year-structure node's contribution to the year percentage.
+        /// parentScalePercent is this node's own weighting already multiplied down from every
+        /// ancestor (e.g. a Term node at 30% under an SBA group at 25% contributes at 7.5%).
+        /// </summary>
+        private async Task<(decimal Contribution, bool HasData)> EvaluateYearNode(
+            int learnerId, int subjectId, WeightingNode node, decimal parentScalePercent)
+        {
+            if (node.ChildNodes.Count > 0)
+            {
+                decimal total = 0m;
+                bool anyData = false;
+                foreach (var child in node.ChildNodes.OrderBy(c => c.DisplayOrder))
+                {
+                    var childScale = parentScalePercent * (child.Weighting / 100m);
+                    var (contribution, hasData) = await EvaluateYearNode(learnerId, subjectId, child, childScale);
+                    total += contribution;
+                    anyData |= hasData;
+                }
+                return (total, anyData);
+            }
+
+            if (node.NodeType == "Term" && node.ReferencedTerm.HasValue)
+            {
+                var termResult = await CalculateWeightedTermMark(learnerId, subjectId, node.ReferencedTerm.Value);
+                if (!termResult.IsSuccessful) return (0m, false);
+                return (parentScalePercent * (termResult.WeightedPercentage / 100m), true);
+            }
+
+            if (node.NodeType == "AssessmentType" && node.AssessmentTypeId.HasValue)
+            {
+                var typePercentage = await CalculateAssessmentTypePercentage(learnerId, node.AssessmentTypeId.Value);
+                if (!typePercentage.HasValue) return (0m, false);
+                return (parentScalePercent * (typePercentage.Value / 100m), true);
+            }
+
+            return (0m, false);
+        }
+
+        /// <summary>
+        /// A learner's percentage for a single AssessmentType across all its Assessments,
+        /// independent of any term's weighting structure — used for Year-level "AssessmentType"
+        /// nodes (e.g. a Final Exam) that stand on their own rather than being blended into a
+        /// term's overall weighted mark.
+        /// </summary>
+        private async Task<decimal?> CalculateAssessmentTypePercentage(int learnerId, int assessmentTypeId)
+        {
+            var assessments = await _context.Assessments
+                .Where(a => a.AssessmentTypeId == assessmentTypeId)
+                .ToListAsync();
+
+            decimal totalMarksAvailable = assessments.Sum(a => a.MaxMark);
+            if (totalMarksAvailable <= 0) return null;
+
+            var assessmentIds = assessments.Select(a => a.AssessmentId).ToList();
+            var learnerMarks = await _context.LearnerMarks
+                .Where(m => assessmentIds.Contains(m.AssessmentId) && m.LearnerId == learnerId)
+                .ToListAsync();
+
+            decimal marksEarned = learnerMarks.Sum(m => m.IsAbsent ? 0m : m.MarksAwarded);
+            return (marksEarned / totalMarksAvailable) * 100m;
+        }
+
+        /// <summary>
         /// Gets the APS level (0-7) based on percentage using the GradeBand configuration.
         /// Falls back to default bands if custom bands not configured.
         /// </summary>
@@ -240,6 +371,30 @@ namespace ARIS1.Services
         public List<AssessmentTypeBreakdown> TypeBreakdown { get; set; } = new();
 
         public string GetGrade() => WeightCalculationService.GetGradeLetterFromAPS(APSLevel);
+    }
+
+    /// <summary>
+    /// Result of a year (promotion) mark calculation from a subject's Year-level weighting structure
+    /// </summary>
+    public class YearMarkResult
+    {
+        public decimal YearPercentage { get; set; }
+        public int APSLevel { get; set; }
+        public bool IsSuccessful { get; set; }
+        public string? Error { get; set; }
+        public List<YearMarkBreakdown> Breakdown { get; set; } = new();
+
+        public string GetGrade() => WeightCalculationService.GetGradeLetterFromAPS(APSLevel);
+    }
+
+    /// <summary>
+    /// Breakdown of how each root node of a Year weighting structure contributes to the year mark
+    /// </summary>
+    public class YearMarkBreakdown
+    {
+        public string NodeName { get; set; } = string.Empty;
+        public decimal Weight { get; set; }
+        public decimal ContributionToYear { get; set; }
     }
 
     /// <summary>

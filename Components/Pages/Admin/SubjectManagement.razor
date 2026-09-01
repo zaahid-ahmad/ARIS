@@ -12,6 +12,7 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject AppDbContext DbContext
 @inject NavigationManager Navigation
+@inject WeightingService WeightingService
 
 <button class="btn btn-primary mb-3" @onclick="() => showCreateForm = true">
     + Add New Subject
@@ -276,19 +277,35 @@ else
                                 Weightings
                             </button>
                         </li>
+                        <li class="nav-item">
+                            <button class="nav-link @(activeTab == "year" ? "active" : "")"
+                                    @onclick="SwitchToYearTab">
+                                Year Weighting
+                            </button>
+                        </li>
                     </ul>
 
-                    <!-- Shared Term Selector -->
-                    <div class="btn-group mb-4" role="group">
-                        @foreach (var t in new[] { 1, 2, 3, 4 })
+                    <!-- Shared Term Selector (not used by the Year tab — Year isn't term-scoped) -->
+                    @if (activeTab != "year")
+                    {
+                        <div class="btn-group mb-4" role="group">
+                            @foreach (var t in AvailableTerms)
+                            {
+                                <button type="button"
+                                        class="btn @(manageTerm == t ? "btn-primary" : "btn-outline-primary")"
+                                        @onclick="() => OnManageTermChanged(t)">
+                                    Term @t
+                                </button>
+                            }
+                        </div>
+                        @if (selectedSubject?.Grade == 12)
                         {
-                            <button type="button"
-                                    class="btn @(manageTerm == t ? "btn-primary" : "btn-outline-primary")"
-                                    @onclick="() => OnManageTermChanged(t)">
-                                Term @t
-                            </button>
+                            <p class="text-muted small mb-3">
+                                Grade 12 subjects only have Terms 1–3 here — the final NSC exam result is
+                                held by the Department of Basic Education, not captured in ARIS.
+                            </p>
                         }
-                    </div>
+                    }
 
                     <!-- ===== ASSESSMENTS TAB ===== -->
                     @if (activeTab == "assessments")
@@ -567,6 +584,180 @@ else
                         }
                     }
 
+                    <!-- ===== YEAR WEIGHTING TAB ===== -->
+                    @if (activeTab == "year")
+                    {
+                        @if (!string.IsNullOrEmpty(yearWeightError))
+                        {
+                            <div class="alert alert-danger">@yearWeightError</div>
+                        }
+                        @if (!string.IsNullOrEmpty(yearWeightSuccess))
+                        {
+                            <div class="alert alert-success">@yearWeightSuccess</div>
+                        }
+
+                        <p class="text-muted small">
+                            Build how this subject's Term marks and assessment types roll up into a Year
+                            (promotion) mark. Each node is either a <strong>Group</strong> (a container for
+                            child nodes), a reference to one <strong>Term</strong>'s weighted mark, or a
+                            reference to one <strong>Assessment Type</strong>'s own percentage (e.g. a Final
+                            Exam). Shapes are entirely up to you — e.g. an "SBA" group containing Term nodes,
+                            with a sibling Assessment Type node for the final exam.
+                        </p>
+
+                        @if (yearStructure != null)
+                        {
+                            @if (yearStructure.RootNodes.Count == 0)
+                            {
+                                <p class="text-muted">No year weighting nodes yet. Add a root node below to get started.</p>
+                            }
+                            else
+                            {
+                                <table class="table" style="max-width:760px;">
+                                    <thead>
+                                        <tr>
+                                            <th>Node</th>
+                                            <th style="width:150px;">Type</th>
+                                            <th style="width:230px;">References</th>
+                                            <th style="width:110px;">Weight %</th>
+                                            <th style="width:100px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var root in yearStructure.RootNodes.OrderBy(n => n.DisplayOrder))
+                                        {
+                                            <tr>
+                                                <td><input class="form-control form-control-sm" @bind="root.Name" /></td>
+                                                <td>
+                                                    <select class="form-control form-control-sm" @bind="root.NodeType">
+                                                        <option value="Custom">Group</option>
+                                                        <option value="Term">Term</option>
+                                                        <option value="AssessmentType">Assessment Type</option>
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    @if (root.NodeType == "Term")
+                                                    {
+                                                        <select class="form-control form-control-sm" @bind="root.ReferencedTerm">
+                                                            @foreach (var t in AvailableTerms)
+                                                            {
+                                                                <option value="@t">Term @t</option>
+                                                            }
+                                                        </select>
+                                                    }
+                                                    else if (root.NodeType == "AssessmentType")
+                                                    {
+                                                        <select class="form-control form-control-sm" @bind="root.AssessmentTypeId">
+                                                            <option value="">-- Select --</option>
+                                                            @foreach (var type in yearAssessmentTypes)
+                                                            {
+                                                                <option value="@type.AssessmentTypeId">@type.Name (Term @type.Term)</option>
+                                                            }
+                                                        </select>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted small">@root.ChildNodes.Count child node(s)</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <input type="number" class="form-control form-control-sm"
+                                                           value="@FormatWeight(root.Weighting)"
+                                                           @onchange="@(e => OnYearWeightChanged(root, e.Value?.ToString()))"
+                                                           min="0" max="100" step="any" />
+                                                </td>
+                                                <td class="text-nowrap">
+                                                    @if (root.NodeType == "Custom")
+                                                    {
+                                                        <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => AddYearChildNode(root)">+ Child</button>
+                                                    }
+                                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveYearNode(root)">×</button>
+                                                </td>
+                                            </tr>
+
+                                            @if (root.ChildNodes.Count > 0)
+                                            {
+                                                <tr>
+                                                    <td colspan="5" class="p-0">
+                                                        <table class="table table-sm mb-0 ms-4" style="max-width:700px;">
+                                                            <tbody>
+                                                                @foreach (var child in root.ChildNodes.OrderBy(c => c.DisplayOrder))
+                                                                {
+                                                                    <tr>
+                                                                        <td style="width:190px;">
+                                                                            <input class="form-control form-control-sm" @bind="child.Name" />
+                                                                        </td>
+                                                                        <td style="width:150px;">
+                                                                            <select class="form-control form-control-sm" @bind="child.NodeType">
+                                                                                <option value="Term">Term</option>
+                                                                                <option value="AssessmentType">Assessment Type</option>
+                                                                            </select>
+                                                                        </td>
+                                                                        <td style="width:230px;">
+                                                                            @if (child.NodeType == "Term")
+                                                                            {
+                                                                                <select class="form-control form-control-sm" @bind="child.ReferencedTerm">
+                                                                                    @foreach (var t in AvailableTerms)
+                                                                                    {
+                                                                                        <option value="@t">Term @t</option>
+                                                                                    }
+                                                                                </select>
+                                                                            }
+                                                                            else
+                                                                            {
+                                                                                <select class="form-control form-control-sm" @bind="child.AssessmentTypeId">
+                                                                                    <option value="">-- Select --</option>
+                                                                                    @foreach (var type in yearAssessmentTypes)
+                                                                                    {
+                                                                                        <option value="@type.AssessmentTypeId">@type.Name (Term @type.Term)</option>
+                                                                                    }
+                                                                                </select>
+                                                                            }
+                                                                        </td>
+                                                                        <td style="width:110px;">
+                                                                            <input type="number" class="form-control form-control-sm"
+                                                                                   value="@FormatWeight(child.Weighting)"
+                                                                                   @onchange="@(e => OnYearWeightChanged(child, e.Value?.ToString()))"
+                                                                                   min="0" max="100" step="any" />
+                                                                        </td>
+                                                                        <td style="width:100px;">
+                                                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveYearNode(child)">×</button>
+                                                                        </td>
+                                                                    </tr>
+                                                                }
+                                                                <tr>
+                                                                    <td colspan="5">
+                                                                        <span class="small @(Math.Abs(root.ChildNodes.Sum(c => c.Weighting) - 100m) > 0.001m ? "text-danger" : "text-success")">
+                                                                            Children total: @root.ChildNodes.Sum(c => c.Weighting).ToString("0.##")%
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            </tbody>
+                                                        </table>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                    <tfoot class="table-light">
+                                        <tr>
+                                            <td colspan="3"><strong>Root Total</strong></td>
+                                            <td colspan="2">
+                                                <span class="fw-bold @(Math.Abs(yearWeightTotal - 100m) > 0.001m ? "text-danger" : "text-success")">
+                                                    @yearWeightTotal.ToString("0.##")%
+                                                    @(Math.Abs(yearWeightTotal - 100m) > 0.001m ? "⚠ Must be 100%" : "✓")
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            }
+
+                            <button class="btn btn-outline-primary me-2" @onclick="AddYearRootNode">+ Add Root Node</button>
+                            <button class="btn btn-success" @onclick="SaveYearStructure">Save Year Weighting</button>
+                        }
+                    }
+
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="CloseManageModal">Close</button>
@@ -648,12 +839,23 @@ else
     private List<AssessmentQuestion> assessmentQuestions = new();
     private WeightingStructure? weightingStructure;
 
+    // Year Weighting tab
+    private WeightingStructure? yearStructure;
+    private List<AssessmentType> yearAssessmentTypes = new();
+    private decimal yearWeightTotal = 0m;
+    private string yearWeightError = string.Empty;
+    private string yearWeightSuccess = string.Empty;
+
     // UI State
     private bool showCreateForm = false;
     private bool showAssessmentTypes = false;
     private int selectedGrade = 0;
     private string activeTab = "assessments";
     private int manageTerm = 1;
+
+    // Grade 12's real final exam mark is held by the DBE, not captured in ARIS — there's no
+    // Term 4 for those subjects in this system at all.
+    private int[] AvailableTerms => selectedSubject?.Grade == 12 ? new[] { 1, 2, 3 } : new[] { 1, 2, 3, 4 };
 
     // Pagination
     private int currentPage = 1;
@@ -997,6 +1199,12 @@ else
             return;
         }
 
+        if (selectedSubject!.Grade == 12 && manageTerm == 4)
+        {
+            assessmentTypeError = "Grade 12 subjects cannot have Term 4 assessment types — the final NSC result is held by the DBE, not captured here.";
+            return;
+        }
+
         var type = new AssessmentType
         {
             SubjectId = selectedSubject!.SubjectId,
@@ -1111,6 +1319,12 @@ else
         if (!assessmentValid)
         {
             assessmentError = "Please fix the highlighted fields.";
+            return;
+        }
+
+        if (selectedSubject!.Grade == 12 && manageTerm == 4)
+        {
+            assessmentError = "Grade 12 subjects cannot have Term 4 assessments — the final NSC result is held by the DBE, not captured here.";
             return;
         }
 
@@ -1518,6 +1732,211 @@ else
         catch (Exception ex)
         {
             weightError = $"Error: {ex.Message}";
+        }
+    }
+
+    // ===== YEAR WEIGHTING =====
+    private async Task SwitchToYearTab()
+    {
+        activeTab = "year";
+        await LoadYearStructure();
+    }
+
+    private async Task LoadYearStructure()
+    {
+        yearWeightError = string.Empty;
+        yearWeightSuccess = string.Empty;
+
+        if (selectedSubject == null)
+        {
+            yearWeightError = "No subject selected.";
+            return;
+        }
+
+        var existing = await DbContext.WeightingStructures
+            .AsNoTracking()
+            .Include(ws => ws.RootNodes)
+            .ThenInclude(n => n.ChildNodes)
+            .FirstOrDefaultAsync(ws => ws.SubjectId == selectedSubject.SubjectId && ws.Term == 0);
+
+        // WeightingStructure.RootNodes is actually every node belonging to the structure (it's
+        // the collection side of the WeightingStructureId FK, not a true-roots-only filter) — the
+        // original flat per-term editor never had children so this never mattered before. Filter
+        // down to actual top-level nodes here; each one's own ChildNodes (populated above via
+        // ThenInclude, keyed off ParentNodeId) is unaffected by filtering this outer list.
+        yearStructure = existing == null
+            ? new WeightingStructure
+            {
+                SubjectId = selectedSubject.SubjectId,
+                Term = 0,
+                Name = $"{selectedSubject.Name} - Year",
+                IsActive = true,
+                RootNodes = new List<WeightingNode>()
+            }
+            : new WeightingStructure
+            {
+                WeightingStructureId = existing.WeightingStructureId,
+                SubjectId = existing.SubjectId,
+                Term = existing.Term,
+                Name = existing.Name,
+                IsActive = existing.IsActive,
+                RootNodes = existing.RootNodes.Where(n => n.ParentNodeId == null).ToList()
+            };
+
+        // Every AssessmentType across every term this subject has — not just the currently
+        // selected manageTerm, since Year nodes can reference any of them.
+        yearAssessmentTypes = await DbContext.AssessmentTypes
+            .AsNoTracking()
+            .Where(at => at.SubjectId == selectedSubject.SubjectId)
+            .ToListAsync();
+
+        RecalculateYearWeightTotal();
+    }
+
+    private void AddYearRootNode()
+    {
+        if (yearStructure == null) return;
+        yearStructure.RootNodes.Add(new WeightingNode
+        {
+            NodeType = "Custom",
+            Name = "New Group",
+            Weighting = 0m,
+            DisplayOrder = yearStructure.RootNodes.Count,
+            ChildNodes = new List<WeightingNode>()
+        });
+        RecalculateYearWeightTotal();
+    }
+
+    private void AddYearChildNode(WeightingNode parent)
+    {
+        parent.ChildNodes.Add(new WeightingNode
+        {
+            NodeType = "Term",
+            Name = "New Term",
+            Weighting = 0m,
+            DisplayOrder = parent.ChildNodes.Count,
+            // The <select> below defaults its displayed option to the first Term regardless of
+            // the bound value, so without this the model silently stays null unless the admin
+            // happens to touch the dropdown.
+            ReferencedTerm = AvailableTerms.FirstOrDefault()
+        });
+    }
+
+    private void RemoveYearNode(WeightingNode node)
+    {
+        if (yearStructure == null) return;
+
+        if (yearStructure.RootNodes.Remove(node))
+        {
+            RecalculateYearWeightTotal();
+            return;
+        }
+
+        foreach (var root in yearStructure.RootNodes)
+        {
+            if (root.ChildNodes.Remove(node)) return;
+        }
+    }
+
+    private void OnYearWeightChanged(WeightingNode node, string? rawValue)
+    {
+        if (decimal.TryParse(rawValue, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var v))
+            node.Weighting = Math.Max(0m, Math.Min(100m, v));
+        RecalculateYearWeightTotal();
+    }
+
+    private void RecalculateYearWeightTotal()
+    {
+        yearWeightTotal = yearStructure?.RootNodes?.Sum(n => n.Weighting) ?? 0m;
+    }
+
+    private async Task SaveYearStructure()
+    {
+        yearWeightError = string.Empty;
+        yearWeightSuccess = string.Empty;
+
+        if (yearStructure == null || selectedSubject == null)
+        {
+            yearWeightError = "Invalid structure.";
+            return;
+        }
+
+        var validation = WeightingService.ValidateWeightingStructure(yearStructure);
+        if (!validation.IsValid)
+        {
+            yearWeightError = validation.Message;
+            return;
+        }
+
+        try
+        {
+            var existing = await DbContext.WeightingStructures
+                .FirstOrDefaultAsync(ws => ws.SubjectId == selectedSubject.SubjectId && ws.Term == 0);
+
+            if (existing == null)
+            {
+                existing = new WeightingStructure
+                {
+                    SubjectId = selectedSubject.SubjectId,
+                    Term = 0,
+                    Name = $"{selectedSubject.Name} - Year",
+                    IsActive = true
+                };
+                DbContext.WeightingStructures.Add(existing);
+                await DbContext.SaveChangesAsync();
+            }
+
+            // Clear-and-recreate rather than diff the tree — simplest way to handle arbitrary
+            // add/remove/reparent edits, mirrors the precedent already used elsewhere in this
+            // file (ConfirmDeleteAssessmentType) and in WeightingService.CreateSimpleWeighting.
+            var existingNodes = await DbContext.WeightingNodes
+                .Where(n => n.WeightingStructureId == existing.WeightingStructureId)
+                .ToListAsync();
+            DbContext.WeightingNodes.RemoveRange(existingNodes);
+            await DbContext.SaveChangesAsync();
+
+            int order = 0;
+            foreach (var root in yearStructure.RootNodes)
+            {
+                var newRoot = new WeightingNode
+                {
+                    WeightingStructureId = existing.WeightingStructureId,
+                    ParentNodeId = null,
+                    NodeType = root.NodeType,
+                    Name = root.Name,
+                    Weighting = root.Weighting,
+                    DisplayOrder = order++,
+                    AssessmentTypeId = root.NodeType == "AssessmentType" ? root.AssessmentTypeId : null,
+                    ReferencedTerm = root.NodeType == "Term" ? (root.ReferencedTerm ?? AvailableTerms.FirstOrDefault()) : null
+                };
+                DbContext.WeightingNodes.Add(newRoot);
+                await DbContext.SaveChangesAsync(); // need newRoot's id before adding its children
+
+                int childOrder = 0;
+                foreach (var child in root.ChildNodes)
+                {
+                    DbContext.WeightingNodes.Add(new WeightingNode
+                    {
+                        WeightingStructureId = existing.WeightingStructureId,
+                        ParentNodeId = newRoot.WeightingNodeId,
+                        NodeType = child.NodeType,
+                        Name = child.Name,
+                        Weighting = child.Weighting,
+                        DisplayOrder = childOrder++,
+                        AssessmentTypeId = child.NodeType == "AssessmentType" ? child.AssessmentTypeId : null,
+                        ReferencedTerm = child.NodeType == "Term" ? (child.ReferencedTerm ?? AvailableTerms.FirstOrDefault()) : null
+                    });
+                }
+                await DbContext.SaveChangesAsync();
+            }
+
+            yearWeightSuccess = "Year weighting saved!";
+            await LoadYearStructure();
+        }
+        catch (Exception ex)
+        {
+            yearWeightError = $"Error: {ex.Message}";
         }
     }
 }

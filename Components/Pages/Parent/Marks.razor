@@ -9,6 +9,7 @@
 @inject AppDbContext DbContext
 @inject AuthenticationStateProvider AuthStateProvider
 @inject SchoolAuthorizationService SchoolAuth
+@inject WeightCalculationService WeightCalculationService
 
 @if (accessDenied)
 {
@@ -62,7 +63,20 @@ else
                                 }
                             </tbody>
                         </table>
-                        <p><strong>Subject Average: @subjectMarks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100).ToString("F1")%</strong></p>
+                        var summary = subjectMarkSummaryCache.GetValueOrDefault(subject.SubjectId);
+                        @if (summary != null && (summary.TermMarks.Count > 0 || summary.YearMark != null))
+                        {
+                            <p>
+                                @foreach (var (term, pct) in summary.TermMarks)
+                                {
+                                    <span class="badge bg-secondary me-1">Term @term: @pct.ToString("F1")%</span>
+                                }
+                                @if (summary.YearMark != null)
+                                {
+                                    <span class="badge bg-primary">Year Mark: @summary.YearMark.YearPercentage.ToString("F1")%</span>
+                                }
+                            </p>
+                        }
                     }
                 </div>
             </div>
@@ -77,7 +91,16 @@ else
     private string? learnerName;
     private List<Subject>? subjects;
     private Dictionary<int, List<LearnerMark>> subjectMarksCache = new();
+    private Dictionary<int, SubjectMarkSummary> subjectMarkSummaryCache = new();
     private string errorMessage = string.Empty;
+
+    // Weighted Term Marks + Year Mark for one subject, via WeightCalculationService — replaces
+    // the old flat/unweighted average, which ignored assessment-type weighting and term boundaries.
+    private class SubjectMarkSummary
+    {
+        public List<(int Term, decimal Percentage)> TermMarks { get; set; } = new();
+        public YearMarkResult? YearMark { get; set; }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -122,12 +145,28 @@ else
                 .Include(m => m.Assessment)
                 .ToListAsync();
 
+            var summaryCache = new Dictionary<int, SubjectMarkSummary>();
             foreach (var subject in subjects)
             {
                 subjectMarksCache[subject.SubjectId] = allMarks
                     .Where(m => m.Assessment.SubjectId == subject.SubjectId)
                     .ToList();
+
+                var summary = new SubjectMarkSummary();
+                foreach (var term in new[] { 1, 2, 3, 4 })
+                {
+                    var termResult = await WeightCalculationService.CalculateWeightedTermMark(LearnerId, subject.SubjectId, term);
+                    if (termResult.IsSuccessful)
+                        summary.TermMarks.Add((term, termResult.WeightedPercentage));
+                }
+
+                var yearResult = await WeightCalculationService.CalculateYearMark(LearnerId, subject.SubjectId);
+                if (yearResult.IsSuccessful)
+                    summary.YearMark = yearResult;
+
+                summaryCache[subject.SubjectId] = summary;
             }
+            subjectMarkSummaryCache = summaryCache;
         }
         catch (Exception ex)
         {
