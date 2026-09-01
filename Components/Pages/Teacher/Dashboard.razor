@@ -86,12 +86,93 @@ else
     </div>
 }
 
+@if (!isLoadingAlerts && subjectRiskCards.Count > 0)
+{
+    <div class="row mt-3">
+        @foreach (var card in subjectRiskCards)
+        {
+            <div class="col-md-4">
+                <div class="card mb-3" style="cursor: pointer;" @onclick='() => Navigation.NavigateTo("/teacher/atrisk")'>
+                    <div class="card-header">
+                        <span class="card-title">@card.SubjectName</span>
+                    </div>
+                    <div class="card-body text-center">
+                        @if (card.TotalLearners == 0)
+                        {
+                            <svg width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="@($"{card.SubjectName} risk distribution")">
+                                <circle cx="48" cy="48" r="40" fill="none" stroke="#e9ecef" stroke-width="12" />
+                            </svg>
+                            <p class="text-muted mt-2 mb-0">No learners enrolled</p>
+                        }
+                        else
+                        {
+                            <div style="position: relative; width: 96px; height: 96px; margin: 0 auto;">
+                                <svg width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="@($"{card.SubjectName} risk distribution")">
+                                    <circle cx="48" cy="48" r="40" fill="none" stroke="#e9ecef" stroke-width="12" />
+                                    @{
+                                        var circumference = 2 * Math.PI * 40;
+                                        double drawnSoFar = 0;
+                                    }
+                                    @foreach (var band in card.Bands.Where(b => b.Count > 0))
+                                    {
+                                        var fraction = (double)band.Count / card.TotalLearners;
+                                        var dash = fraction * circumference;
+                                        var gap = circumference - dash;
+                                        <circle cx="48" cy="48" r="40" fill="none"
+                                                stroke="@band.Color" stroke-width="12"
+                                                stroke-dasharray="@($"{dash.ToString(System.Globalization.CultureInfo.InvariantCulture)} {gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}")"
+                                                stroke-dashoffset="@((-drawnSoFar).ToString(System.Globalization.CultureInfo.InvariantCulture))"
+                                                transform="rotate(-90 48 48)" />
+                                        drawnSoFar += dash;
+                                    }
+                                </svg>
+                                <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.1rem; color: var(--ink);">
+                                    @card.TotalLearners
+                                </div>
+                            </div>
+                            <div class="legend justify-content-center mt-2">
+                                @foreach (var band in card.Bands.Where(b => b.Count > 0))
+                                {
+                                    <div class="legend-item">
+                                        <span class="legend-icon" style="background:@band.Color;border-radius:50%;"></span>
+                                        <small class="text-muted">@band.Level: @band.Count</small>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
 @code {
     private User? currentUser;
     private int? currentSchoolId;
     private string errorMessage = string.Empty;
     private bool isLoadingAlerts = true;
     private int atRiskLearnerCount = 0;
+
+    private class SubjectRiskCard
+    {
+        public int SubjectId { get; set; }
+        public string SubjectName { get; set; } = "";
+        public int TotalLearners { get; set; }
+        // Fixed order: Critical, High, Moderate, Low — matches the palette order everywhere else.
+        public List<(string Level, int Count, string Color)> Bands { get; set; } = new();
+    }
+
+    private List<SubjectRiskCard> subjectRiskCards = new();
+
+    // Same palette/order as the AtRisk.razor scatter chart legend — ordered risk state, not categorical series.
+    private static readonly (string Level, string Color)[] RiskLevelPalette =
+    {
+        ("Critical", "#d03b3b"),
+        ("High", "#ec835a"),
+        ("Moderate", "#fab219"),
+        ("Low", "#0ca30c")
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -138,6 +219,7 @@ else
             .ToListAsync();
 
         var atRiskLearnerIds = new HashSet<int>();
+        var cards = new List<SubjectRiskCard>();
 
         foreach (var subject in subjects)
         {
@@ -147,6 +229,8 @@ else
                 .Select(ls => ls.LearnerId)
                 .ToListAsync();
 
+            var levelCounts = RiskLevelPalette.ToDictionary(p => p.Level, p => 0);
+
             foreach (var learnerId in learnerIds)
             {
                 var risk = await RiskAssessment.CalculateRiskScore(learnerId, subject.SubjectId);
@@ -154,10 +238,20 @@ else
                 {
                     atRiskLearnerIds.Add(learnerId);
                 }
+                levelCounts[risk.Level]++;
             }
+
+            cards.Add(new SubjectRiskCard
+            {
+                SubjectId = subject.SubjectId,
+                SubjectName = subject.Name,
+                TotalLearners = learnerIds.Count,
+                Bands = RiskLevelPalette.Select(p => (p.Level, levelCounts[p.Level], p.Color)).ToList()
+            });
         }
 
         atRiskLearnerCount = atRiskLearnerIds.Count;
+        subjectRiskCards = cards;
     }
 
     private void Logout()
