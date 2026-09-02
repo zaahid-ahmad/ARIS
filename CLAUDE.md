@@ -64,16 +64,26 @@ Each page uses `@attribute [Authorize(Roles = "...")]` to restrict access. The t
 
 1. Admin creates `Subject` → Teacher creates `AssessmentType` (e.g. "SBA", "Exam") → Teacher creates `Assessment` (linked to type + term)
 2. Teacher enters `LearnerMark` per learner per assessment. Assessments can have `AssessmentQuestion` sub-items, tracked via `LearnerQuestionMark`.
-3. `WeightCalculationService.CalculateWeightedTermMark()` computes a learner's weighted term percentage using the `WeightingStructure` for that subject/term. Weights must sum to 100% at each level (validated by `WeightingService.ValidateWeightingStructure()`).
+3. `WeightCalculationService.CalculateWeightedTermMark()` computes a learner's weighted term percentage using the `WeightingStructure` for that subject/term. Weights must sum to 100% at each level (validated by `WeightingService.ValidateWeightingStructure()`). `CalculateYearMark()` rolls several terms' marks (plus, optionally, a standalone exam `AssessmentType`) into a year/promotion mark — see Weighting System below.
 4. APS levels (0–7, South African system) are resolved from custom `GradeBand` rows per subject, falling back to default percentage bands.
 
 ### Intervention System
 
 `InterventionService.GenerateInterventions()` is called after marking a `LearnerQuestionMark`. It calculates a percentage and creates or updates an `Intervention` record with one of five levels: `Critical` (≤30%), `Attention` (≤55%), `Focus` (≤65%), `Minor` (≤79%), `WellDone` (>79%). Interventions are shown to learners under `/learner/support`.
 
+### Risk Assessment
+
+`RiskAssessmentService.CalculateRiskScore(learnerId, subjectId)` computes a composite score (60% academic average + 30% attendance + 10% trend, trend currently fixed at 0.5) and maps it to a level: `Critical` (score ≥55), `High` (≥`AtRiskThreshold` = 45), `Moderate` (≥30), `Low` otherwise. Two entry points share one scoring implementation (`BuildRiskData`, private): the single-learner `CalculateRiskScore`, and `CalculateRiskScoresForSubject(subjectId, learnerIds)` — a batched version that does 2 DB queries for the whole subject instead of 2 per learner. Any page walking every learner in a subject (`Teacher/Dashboard.razor`'s per-subject risk-donut cards, `Teacher/AtRisk.razor`'s scatter chart/table) must use the batched call — the per-learner version turns into hundreds of sequential round trips once a subject has dozens of enrolled learners.
+
+`Teacher/Dashboard.razor` shows one card per subject the teacher teaches, each with an inline-SVG donut (stroke-dasharray technique, no charting library) breaking that subject's enrolled learners down by risk band, plus a click-through banner for the total at-risk count across all subjects — both fed by the same batched risk walk (one pass over the data, not two).
+
 ### Weighting System
 
-`WeightingStructure` (per subject+term, unique index) contains a tree of `WeightingNode` records. Nodes are self-referencing (parent/child) and can be of type `AssessmentType`, `Assessment`, `Custom`, or `Task`. A flat structure (all root nodes) is the common case, set up via `WeightingService.CreateSimpleWeighting()`.
+`WeightingStructure` (per subject+term, unique index) contains a tree of `WeightingNode` records. Nodes are self-referencing (parent/child) and can be of type `AssessmentType`, `Assessment`, `Custom`, `Term`, or `Task`. A flat structure (all root nodes) is the common case for a single term, set up via `WeightingService.CreateSimpleWeighting()`.
+
+`WeightingStructure.Term == 0` is a reserved sentinel (not a real term) marking a subject's **Year structure** — how its term marks and assessment types roll up into a year/promotion mark, configured under `Admin/SubjectManagement.razor`'s "Year Weighting" tab. Shape is arbitrary (not hardcoded to any fixed SBA/exam split): a `Custom` node is a pure group for children, a `Term` node substitutes in that term's weighted mark (`WeightingNode.ReferencedTerm` says which), an `AssessmentType` node substitutes in that one type's own percentage standalone (e.g. a Final Exam). `WeightCalculationService.CalculateYearMark(learnerId, subjectId)` evaluates the tree recursively, built almost entirely out of `CalculateWeightedTermMark` — no separate percentage math. Surfaced as an "Overall: Term 1... Year Mark..." summary on `Teacher/LearnerProfiles.razor` and replacing the old flat/unweighted average on `Learner/Marks.razor` and `Parent/Marks.razor`.
+
+**Grade 12 subjects only have Terms 1–3** (Admin/SubjectManagement.razor's term selector and Year Weighting term picker both restrict to `{1,2,3}` when `Subject.Grade == 12`, with a server-side guard on assessment/type creation too) — the real NSC final exam mark is held externally by the Department of Basic Education and isn't captured in ARIS, so Term 4 doesn't exist in this system for Grade 12.
 
 ### Database & Seeding
 

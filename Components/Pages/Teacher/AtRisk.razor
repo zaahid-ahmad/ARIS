@@ -355,11 +355,10 @@ else
             // updated together, in one shot, so a render can never see one field
             // (allLearnersInSubject) reflect this load while another (learnerRiskCache)
             // still reflects a previous or concurrent one.
-            var riskCache = new Dictionary<int, RiskData>();
-            foreach (var learner in learners)
-            {
-                riskCache[learner.LearnerId] = await RiskAssessment.CalculateRiskScore(learner.LearnerId, subjectId);
-            }
+            // Batched (2 DB round trips total) instead of calling CalculateRiskScore per
+            // learner — subjects with dozens of enrolled learners made this take seconds.
+            var riskCache = await RiskAssessment.CalculateRiskScoresForSubject(
+                subjectId, learners.Select(l => l.LearnerId).ToList());
 
             var flagged = learners
                 .Where(l => riskCache[l.LearnerId].Score >= RiskAssessmentService.AtRiskThreshold)

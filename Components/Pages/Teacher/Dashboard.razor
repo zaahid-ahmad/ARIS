@@ -231,9 +231,15 @@ else
 
             var levelCounts = RiskLevelPalette.ToDictionary(p => p.Level, p => 0);
 
+            // Batched (2 DB round trips for the whole subject) instead of calling
+            // CalculateRiskScore per learner — with dozens of learners per subject and
+            // several subjects per teacher, the per-learner version made this page take
+            // several seconds to load.
+            var riskScores = await RiskAssessment.CalculateRiskScoresForSubject(subject.SubjectId, learnerIds);
+
             foreach (var learnerId in learnerIds)
             {
-                var risk = await RiskAssessment.CalculateRiskScore(learnerId, subject.SubjectId);
+                var risk = riskScores[learnerId];
                 if (risk.Score >= RiskAssessmentService.AtRiskThreshold)
                 {
                     atRiskLearnerIds.Add(learnerId);
