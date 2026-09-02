@@ -60,7 +60,20 @@ namespace ARIS1.Services
                 academicAverage = ResolveAcademicAverage(weightedResult, currentTermMarks);
             }
 
-            return BuildRiskData(learnerId, subjectId, attendanceStatuses, academicAverage);
+            // Trend is deliberately independent of term boundaries — it looks at the learner's
+            // chronological assessment history for this subject (by Assessment.Date), not a
+            // term-to-term average, so a decline showing up late in one term doesn't have to wait
+            // for a full next-term average to register.
+            var chronologicalPercentages = await _dbContext.LearnerMarks
+                .AsNoTracking()
+                .Where(m => m.Assessment.SubjectId == subjectId && m.LearnerId == learnerId && !m.IsAbsent)
+                .OrderBy(m => m.Assessment.Date)
+                .Select(m => m.MarksAwarded / m.Assessment.MaxMark * 100m)
+                .ToListAsync();
+
+            decimal trendFactor = ResolveTrendFactor(chronologicalPercentages);
+
+            return BuildRiskData(learnerId, subjectId, attendanceStatuses, academicAverage, trendFactor);
         }
 
         /// <summary>
@@ -122,12 +135,25 @@ namespace ARIS1.Services
                 }
             }
 
+            // Trend, batched: one query for the whole subject's mark history for these learners
+            // (chronological, no term filter), grouped in memory — independent of the per-term
+            // grouping above used for the academic average.
+            var trendLookup = (await _dbContext.LearnerMarks
+                    .AsNoTracking()
+                    .Where(m => m.Assessment.SubjectId == subjectId && learnerIds.Contains(m.LearnerId) && !m.IsAbsent)
+                    .OrderBy(m => m.Assessment.Date)
+                    .Select(m => new { m.LearnerId, Percentage = m.MarksAwarded / m.Assessment.MaxMark * 100m })
+                    .ToListAsync())
+                .GroupBy(m => m.LearnerId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Percentage).ToList());
+
             foreach (var learnerId in learnerIds)
             {
                 results[learnerId] = BuildRiskData(
                     learnerId, subjectId,
                     attendanceLookup.GetValueOrDefault(learnerId, new List<string>()),
-                    academicAverages.GetValueOrDefault(learnerId, 0m));
+                    academicAverages.GetValueOrDefault(learnerId, 0m),
+                    ResolveTrendFactor(trendLookup.GetValueOrDefault(learnerId, new List<decimal>())));
             }
 
             return results;
@@ -156,10 +182,46 @@ namespace ARIS1.Services
 
         private readonly record struct MarkInfo(decimal MarksAwarded, decimal MaxMark);
 
+        // Window size for the trend comparison — the last N chronological assessment marks for
+        // the subject are split in half (earlier vs. recent) and compared. Averaging each half
+        // (rather than just the single latest mark vs. the single prior one) smooths out one
+        // unusually hard test or a lucky guess, while still reacting within a handful of
+        // assessments instead of waiting for a full term average to close out.
+        private const int TrendWindowSize = 6;
+
+        /// <summary>
+        /// Trend input for the risk score: compares the average of the most recent half of the
+        /// learner's last few assessments (chronological, by Assessment.Date) against the average
+        /// of the earlier half — deliberately NOT a term-to-term comparison, since term boundaries
+        /// are an administrative grouping, not necessarily how a learner's actual trajectory moves.
+        /// Maps the delta onto [0, 10], centered at 5 (neutral, matches the old constant) for no
+        /// change or insufficient history; clamps at 0/10 for a >=20 percentage-point average
+        /// decline/improvement across the window.
+        /// </summary>
+        private static decimal ResolveTrendFactor(List<decimal> chronologicalPercentages)
+        {
+            var window = chronologicalPercentages.Count > TrendWindowSize
+                ? chronologicalPercentages.Skip(chronologicalPercentages.Count - TrendWindowSize).ToList()
+                : chronologicalPercentages;
+
+            if (window.Count < 2)
+                return 5m;
+
+            int earlierCount = window.Count / 2;
+            var earlierHalf = window.Take(earlierCount);
+            var recentHalf = window.Skip(earlierCount);
+
+            decimal delta = recentHalf.Average() - earlierHalf.Average();
+            decimal clampedDelta = Math.Clamp(delta, -20m, 20m);
+            decimal trendFactor = 5m + (clampedDelta / 20m) * 5m;
+
+            return Math.Clamp(trendFactor, 0m, 10m);
+        }
+
         // Pure formula application — Score/Level/Intervention from an already-resolved academic
-        // average + attendance. Shared by the one-learner and batched paths above so they can
-        // never drift apart.
-        private static RiskData BuildRiskData(int learnerId, int subjectId, List<string> attendanceStatuses, decimal academicAverage)
+        // average + attendance + trend factor. Shared by the one-learner and batched paths above
+        // so they can never drift apart.
+        private static RiskData BuildRiskData(int learnerId, int subjectId, List<string> attendanceStatuses, decimal academicAverage, decimal trendFactor)
         {
             var riskData = new RiskData { LearnerId = learnerId, SubjectId = subjectId, AcademicAverage = academicAverage };
 
@@ -168,10 +230,9 @@ namespace ARIS1.Services
                 ? (presentCount * 100m) / attendanceStatuses.Count
                 : 100m;
 
-            // 60% academics + 30% attendance + 10% trend (simplified to 0.5 for now)
+            // 60% academics + 30% attendance + 10% trend (assessment-over-assessment, see ResolveTrendFactor)
             decimal academicFactor = 60m * (riskData.AcademicAverage / 100m);
             decimal attendanceFactor = 30m * (riskData.AttendancePercentage / 100m);
-            decimal trendFactor = 10m * 0.5m;
 
             riskData.Score = 100 - (academicFactor + attendanceFactor + trendFactor);
 
