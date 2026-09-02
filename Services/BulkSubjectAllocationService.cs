@@ -106,7 +106,7 @@ namespace ARIS1.Services
 
             var learners = await _dbContext.Learners
                 .Include(l => l.User)
-                .Where(l => l.Grade == grade && l.Class.Name == className && l.User.SchoolId == schoolId)
+                .Where(l => l.Grade == grade && l.Class.Name == className && l.User.SchoolId == schoolId && l.Status == "Active")
                 .OrderBy(l => l.User.Fullname)
                 .ToListAsync();
 

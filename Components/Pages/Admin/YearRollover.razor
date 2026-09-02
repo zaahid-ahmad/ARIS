@@ -1,0 +1,251 @@
+@page "/admin/year-rollover"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using ARIS1.Services
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject YearRolloverService RolloverService
+@inject AppDbContext DbContext
+@inject NavigationManager Navigation
+
+<h2>Year Rollover</h2>
+<p class="text-muted">Promote learners to the next grade, mark repeaters and graduates, and clone next year's subject catalog — all in one action.</p>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (result != null)
+{
+    <div class="alert alert-success">
+        <strong>Rollover to @confirmedNewYear complete.</strong>
+        @result.Promoted promoted, @result.Repeated repeating, @result.Graduated graduated.
+        @result.SubjectsCloned subject(s) cloned into the new academic year.
+    </div>
+    @if (result.Warnings.Count > 0)
+    {
+        <div class="alert alert-warning">
+            <strong>@result.Warnings.Count learner(s) need manual follow-up:</strong>
+            <ul class="mb-0">
+                @foreach (var warning in result.Warnings)
+                {
+                    <li>@warning</li>
+                }
+            </ul>
+        </div>
+    }
+    <button class="btn btn-secondary" @onclick='() => Navigation.NavigateTo("/admin/previous-years")'>View Previous Years</button>
+}
+else if (preview == null)
+{
+    <div class="card">
+        <div class="card-body">
+            <button class="btn btn-primary" @onclick="LoadPreview" disabled="@isLoading">
+                @(isLoading ? "Loading..." : "Begin Year Rollover")
+            </button>
+        </div>
+    </div>
+}
+else if (preview.IsBlocked)
+{
+    <div class="alert alert-warning">@preview.BlockedReason</div>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5>Rolling from @preview.EndingYear to @preview.NewYear</h5>
+            <p class="text-muted mb-0">
+                @preview.SubjectsToClone subject(s) will be cloned into @preview.NewYear (same name/grade,
+                with their assessment types and weighting structures). Review the actions below before confirming —
+                every learner defaults to being promoted one grade, or graduating if they're in Grade 12.
+            </p>
+        </div>
+    </div>
+
+    @foreach (var grade in new[] { 10, 11, 12 })
+    {
+        var gradeRows = rows.Where(r => r.CurrentGrade == grade).ToList();
+        if (gradeRows.Count == 0) continue;
+
+        <div class="card mb-4">
+            <div class="card-header"><strong>Grade @grade</strong> (@gradeRows.Count learner(s))</div>
+            <div class="card-body p-0">
+                <table class="table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Learner</th>
+                            <th>Current Class</th>
+                            <th>Action</th>
+                            <th>New Class</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in gradeRows)
+                        {
+                            <tr class="@(RowNeedsClassSelection(row) ? "table-danger" : "")">
+                                <td>@row.LearnerName</td>
+                                <td>@row.CurrentClassName</td>
+                                <td>
+                                    <select class="form-control form-control-sm" @bind="row.Action" @bind:after="() => OnActionChanged(row)">
+                                        @if (grade < 12)
+                                        {
+                                            <option value="Promote">Promote to Grade @(grade + 1)</option>
+                                        }
+                                        else
+                                        {
+                                            <option value="Graduate">Graduate</option>
+                                        }
+                                        <option value="Repeat">Repeat Grade @grade</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    @if (row.Action == "Promote")
+                                    {
+                                        <select class="form-control form-control-sm" @bind="row.TargetClassId">
+                                            <option value="">-- Select Class --</option>
+                                            @foreach (var cls in classesByGrade.GetValueOrDefault(grade + 1, new List<SchoolClass>()))
+                                            {
+                                                <option value="@cls.ClassId">@cls.Name</option>
+                                            }
+                                        </select>
+                                        @if (RowNeedsClassSelection(row))
+                                        {
+                                            <small class="text-danger d-block">No matching class — please choose one.</small>
+                                        }
+                                    }
+                                    else if (row.Action == "Repeat")
+                                    {
+                                        <span class="text-muted">@row.CurrentClassName (unchanged)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <button class="btn btn-secondary me-2" @onclick="CancelPreview">Cancel</button>
+    <button class="btn btn-warning" @onclick="ConfirmRollover" disabled="@(isSaving || rows.Any(RowNeedsClassSelection))">
+        @(isSaving ? "Rolling over..." : $"Confirm — Roll Over {rows.Count} Learner(s)")
+    </button>
+}
+
+@code {
+    private int? currentSchoolId;
+    private RolloverPreview? preview;
+    private RolloverResult? result;
+    private int confirmedNewYear;
+    private bool isLoading;
+    private bool isSaving;
+    private string errorMessage = string.Empty;
+    private List<LearnerRowVm> rows = new();
+    private Dictionary<int, List<SchoolClass>> classesByGrade = new();
+
+    private class LearnerRowVm
+    {
+        public int LearnerId { get; set; }
+        public string LearnerName { get; set; } = string.Empty;
+        public int CurrentGrade { get; set; }
+        public string CurrentClassName { get; set; } = string.Empty;
+        public string Action { get; set; } = string.Empty; // "Promote" | "Repeat" | "Graduate"
+        public int? TargetClassId { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+        if (string.IsNullOrEmpty(userName)) { errorMessage = "You must be logged in."; return; }
+
+        var currentUser = await UserManager.FindByNameAsync(userName);
+        currentSchoolId = currentUser?.SchoolId;
+        if (currentSchoolId == null) errorMessage = "You are not assigned to a school.";
+    }
+
+    private static bool RowNeedsClassSelection(LearnerRowVm row) => row.Action == "Promote" && row.TargetClassId == null;
+
+    private void OnActionChanged(LearnerRowVm row)
+    {
+        if (row.Action != "Promote")
+            row.TargetClassId = null;
+    }
+
+    private async Task LoadPreview()
+    {
+        if (currentSchoolId == null) return;
+        isLoading = true;
+        errorMessage = string.Empty;
+        try
+        {
+            preview = await RolloverService.PreviewAsync(currentSchoolId.Value);
+            if (!preview.IsBlocked)
+            {
+                rows = preview.Learners.Select(r => new LearnerRowVm
+                {
+                    LearnerId = r.LearnerId,
+                    LearnerName = r.LearnerName,
+                    CurrentGrade = r.CurrentGrade,
+                    CurrentClassName = r.CurrentClassName,
+                    Action = r.DefaultAction,
+                    TargetClassId = r.TargetClassId
+                }).ToList();
+
+                var allClasses = await DbContext.SchoolClasses
+                    .Where(c => c.SchoolId == currentSchoolId.Value)
+                    .OrderBy(c => c.Name)
+                    .ToListAsync();
+                classesByGrade = allClasses.GroupBy(c => c.Grade).ToDictionary(g => g.Key, g => g.ToList());
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading rollover preview: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void CancelPreview()
+    {
+        preview = null;
+        rows = new();
+    }
+
+    private async Task ConfirmRollover()
+    {
+        if (currentSchoolId == null || preview == null) return;
+        isSaving = true;
+        errorMessage = string.Empty;
+        try
+        {
+            var choices = rows.Select(r => new LearnerRolloverChoice(r.LearnerId, r.Action, r.TargetClassId)).ToList();
+            result = await RolloverService.ExecuteAsync(currentSchoolId.Value, choices);
+            confirmedNewYear = preview.NewYear;
+            preview = null;
+            rows = new();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error rolling over: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+}

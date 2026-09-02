@@ -12,10 +12,13 @@ namespace ARIS1.Models
         public int ClassId { get; set; }
         public SchoolClass Class { get; set; } = null!;
         public int EnrollmentYear { get; set; }
+        public string Status { get; set; } = "Active"; // "Active" or "Graduated"
+        public int? GraduatedAcademicYear { get; set; }
 
         public ICollection<LearnerSubject> LearnerSubjects { get; set; } = new List<LearnerSubject>();
         public ICollection<LearnerMark> LearnerMarks { get; set; } = new List<LearnerMark>();
         public ICollection<AttendanceRecord> AttendanceRecords { get; set; } = new List<AttendanceRecord>();
         public ICollection<ParentLearner> Guardians { get; set; } = new List<ParentLearner>();
+        public ICollection<LearnerYearRecord> YearRecords { get; set; } = new List<LearnerYearRecord>();
     }
 }

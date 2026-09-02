@@ -1,0 +1,376 @@
+@page "/admin/previous-years"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Models
+@using ARIS1.Data
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject AppDbContext DbContext
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<h2>Previous Years</h2>
+<p class="text-muted">Browse the roster and outcomes for each academic year that has been closed out by a Year Rollover.</p>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (selectedYear == null)
+{
+    @if (yearSummaries.Count == 0)
+    {
+        <div class="alert alert-info">No years have been closed out yet — run a Year Rollover first.</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Academic Year</th>
+                        <th>Promoted</th>
+                        <th>Repeated</th>
+                        <th>Graduated</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var summary in yearSummaries)
+                    {
+                        <tr>
+                            <td><strong>@summary.AcademicYear</strong></td>
+                            <td>@summary.Promoted</td>
+                            <td>@summary.Repeated</td>
+                            <td>@summary.Graduated</td>
+                            <td><button class="btn btn-sm btn-primary" @onclick="() => OpenYear(summary.AcademicYear)">View Roster</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+else
+{
+    <button class="btn btn-secondary mb-3" @onclick="BackToLanding">&laquo; Back to Previous Years</button>
+    <h5>Academic Year @selectedYear</h5>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <label class="form-label">Grade</label>
+            <select class="form-control" @bind="gradeFilter" @bind:after="ApplyFilters">
+                <option value="0">-- All Grades --</option>
+                <option value="10">Grade 10</option>
+                <option value="11">Grade 11</option>
+                <option value="12">Grade 12</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Outcome</label>
+            <select class="form-control" @bind="outcomeFilter" @bind:after="ApplyFilters">
+                <option value="">-- All Outcomes --</option>
+                <option value="Promoted">Promoted</option>
+                <option value="Repeated">Repeated</option>
+                <option value="Graduated">Graduated</option>
+            </select>
+        </div>
+    </div>
+
+    @if (filteredRows.Count == 0)
+    {
+        <div class="alert alert-info">No learners match this filter.</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Learner</th>
+                        <th>Grade</th>
+                        <th>Class</th>
+                        <th>Outcome</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in PagedRows)
+                    {
+                        var badgeColor = row.Outcome switch
+                        {
+                            "Graduated" => "success",
+                            "Repeated" => "warning",
+                            _ => "info"
+                        };
+                        <tr>
+                            <td>@row.LearnerName</td>
+                            <td>Grade @row.Grade</td>
+                            <td>@row.ClassName</td>
+                            <td><span class="badge bg-@badgeColor">@row.Outcome</span></td>
+                            <td><button class="btn btn-sm btn-outline-primary" @onclick="() => ViewLearnerYear(row.LearnerId, row.LearnerName)">View</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPage" />
+        </div>
+    }
+}
+
+@if (selectedLearnerId != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title">@selectedLearnerName</h5>
+                        <small class="text-muted">Academic Year @selectedYear</small>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="CloseLearnerModal"></button>
+                </div>
+                <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
+                    @if (isLoadingDetail)
+                    {
+                        <p>Loading...</p>
+                    }
+                    else if (detailSubjects.Count == 0)
+                    {
+                        <div class="alert alert-warning">No subjects on record for this learner in @selectedYear.</div>
+                    }
+                    else
+                    {
+                        @foreach (var subject in detailSubjects)
+                        {
+                            var marks = detailMarksCache.GetValueOrDefault(subject.SubjectId, new List<MarkInfo>());
+                            <div class="card mb-4">
+                                <div class="card-header"><h6 class="mb-0">@subject.Name</h6></div>
+                                <div class="card-body">
+                                    @if (marks.Count == 0)
+                                    {
+                                        <p class="text-muted mb-0"><small>No marks recorded.</small></p>
+                                    }
+                                    else
+                                    {
+                                        <table class="table table-sm mb-0">
+                                            <thead>
+                                                <tr><th>Assessment</th><th>Type</th><th>Term</th><th class="text-end">Mark</th><th class="text-end">%</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var mark in marks)
+                                                {
+                                                    var percentage = mark.MaxMark > 0 ? (mark.MarksAwarded / mark.MaxMark) * 100 : 0;
+                                                    <tr>
+                                                        <td>@mark.AssessmentTitle</td>
+                                                        <td>@mark.AssessmentType</td>
+                                                        <td>Term @mark.Term</td>
+                                                        <td class="text-end">@mark.MarksAwarded.ToString("F1") / @mark.MaxMark.ToString("F0")</td>
+                                                        <td class="text-end">@percentage.ToString("F1")%</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseLearnerModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private int? currentSchoolId;
+    private string errorMessage = string.Empty;
+    private List<YearSummaryVm> yearSummaries = new();
+    private int? selectedYear;
+    private List<RosterRowVm> allRows = new();
+    private List<RosterRowVm> filteredRows = new();
+    private int gradeFilter = 0;
+    private string outcomeFilter = string.Empty;
+
+    private int currentPage = 1;
+    private const int PageSize = 15;
+    private int totalPages => (int)Math.Ceiling(filteredRows.Count / (double)PageSize);
+    private List<RosterRowVm> PagedRows => filteredRows.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    private void GoToPage(int page) => currentPage = page;
+
+    private int? selectedLearnerId;
+    private string selectedLearnerName = string.Empty;
+    private bool isLoadingDetail;
+    private List<Subject> detailSubjects = new();
+    private Dictionary<int, List<MarkInfo>> detailMarksCache = new();
+
+    private class YearSummaryVm
+    {
+        public int AcademicYear { get; set; }
+        public int Promoted { get; set; }
+        public int Repeated { get; set; }
+        public int Graduated { get; set; }
+    }
+
+    private class RosterRowVm
+    {
+        public int LearnerId { get; set; }
+        public string LearnerName { get; set; } = string.Empty;
+        public int Grade { get; set; }
+        public string ClassName { get; set; } = string.Empty;
+        public string Outcome { get; set; } = string.Empty;
+    }
+
+    private class MarkInfo
+    {
+        public string AssessmentTitle { get; set; } = string.Empty;
+        public string AssessmentType { get; set; } = string.Empty;
+        public int Term { get; set; }
+        public decimal MarksAwarded { get; set; }
+        public decimal MaxMark { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userName = authState.User.Identity?.Name;
+        if (string.IsNullOrEmpty(userName)) { errorMessage = "You must be logged in."; return; }
+
+        var currentUser = await UserManager.FindByNameAsync(userName);
+        currentSchoolId = currentUser?.SchoolId;
+        if (currentSchoolId == null) { errorMessage = "You are not assigned to a school."; return; }
+
+        await LoadYearSummaries();
+    }
+
+    private async Task LoadYearSummaries()
+    {
+        var records = await DbContext.LearnerYearRecords
+            .AsNoTracking()
+            .Include(r => r.Learner).ThenInclude(l => l.User)
+            .Where(r => r.Learner.User.SchoolId == currentSchoolId && r.Outcome != "Active")
+            .Select(r => new { r.AcademicYear, r.Outcome })
+            .ToListAsync();
+
+        yearSummaries = records
+            .GroupBy(r => r.AcademicYear)
+            .Select(g => new YearSummaryVm
+            {
+                AcademicYear = g.Key,
+                Promoted = g.Count(r => r.Outcome == "Promoted"),
+                Repeated = g.Count(r => r.Outcome == "Repeated"),
+                Graduated = g.Count(r => r.Outcome == "Graduated")
+            })
+            .OrderByDescending(s => s.AcademicYear)
+            .ToList();
+    }
+
+    private async Task OpenYear(int year)
+    {
+        selectedYear = year;
+        gradeFilter = 0;
+        outcomeFilter = string.Empty;
+        currentPage = 1;
+
+        allRows = (await DbContext.LearnerYearRecords
+                .AsNoTracking()
+                .Include(r => r.Learner).ThenInclude(l => l.User)
+                .Include(r => r.Class)
+                .Where(r => r.AcademicYear == year && r.Learner.User.SchoolId == currentSchoolId && r.Outcome != "Active")
+                .OrderBy(r => r.Grade).ThenBy(r => r.Learner.User.Fullname)
+                .ToListAsync())
+            .Select(r => new RosterRowVm
+            {
+                LearnerId = r.LearnerId,
+                LearnerName = r.Learner.User.Fullname,
+                Grade = r.Grade,
+                ClassName = r.Class.Name,
+                Outcome = r.Outcome
+            })
+            .ToList();
+
+        ApplyFilters();
+    }
+
+    private void BackToLanding()
+    {
+        selectedYear = null;
+        allRows = new();
+        filteredRows = new();
+    }
+
+    private void ApplyFilters()
+    {
+        filteredRows = allRows;
+        if (gradeFilter > 0)
+            filteredRows = filteredRows.Where(r => r.Grade == gradeFilter).ToList();
+        if (!string.IsNullOrEmpty(outcomeFilter))
+            filteredRows = filteredRows.Where(r => r.Outcome == outcomeFilter).ToList();
+        currentPage = 1;
+    }
+
+    private async Task ViewLearnerYear(int learnerId, string learnerName)
+    {
+        if (isLoadingDetail || selectedYear == null) return;
+
+        isLoadingDetail = true;
+        selectedLearnerId = learnerId;
+        selectedLearnerName = learnerName;
+
+        try
+        {
+            var year = selectedYear.Value;
+
+            var subjects = await DbContext.LearnerSubjects
+                .AsNoTracking()
+                .Where(ls => ls.LearnerId == learnerId && ls.Subject.AcademicYear == year)
+                .Include(ls => ls.Subject)
+                .Select(ls => ls.Subject)
+                .OrderBy(s => s.Name)
+                .ToListAsync();
+
+            var marksCache = new Dictionary<int, List<MarkInfo>>();
+            foreach (var subject in subjects)
+            {
+                var marks = await DbContext.LearnerMarks
+                    .AsNoTracking()
+                    .Where(m => m.LearnerId == learnerId && m.Assessment.SubjectId == subject.SubjectId)
+                    .Include(m => m.Assessment).ThenInclude(a => a.AssessmentType)
+                    .OrderBy(m => m.Assessment.Term).ThenBy(m => m.Assessment.Date)
+                    .Select(m => new MarkInfo
+                    {
+                        AssessmentTitle = m.Assessment.Title,
+                        AssessmentType = m.Assessment.AssessmentType!.Name,
+                        Term = m.Assessment.Term,
+                        MarksAwarded = m.MarksAwarded,
+                        MaxMark = m.Assessment.MaxMark
+                    })
+                    .ToListAsync();
+                marksCache[subject.SubjectId] = marks;
+            }
+
+            detailSubjects = subjects;
+            detailMarksCache = marksCache;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading learner history: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingDetail = false;
+        }
+    }
+
+    private void CloseLearnerModal()
+    {
+        selectedLearnerId = null;
+        detailSubjects = new();
+        detailMarksCache = new();
+    }
+}

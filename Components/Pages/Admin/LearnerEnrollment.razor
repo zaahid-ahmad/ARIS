@@ -248,12 +248,13 @@
 
             var enrolledIds = enrolledLearners.Select(l => l.LearnerId).ToList();
 
-            // Load available learners - only those in selected grade and school
+            // Load available learners - only active learners in selected grade and school
             availableLearners = await DbContext.Learners
                 .AsNoTracking()
                 .Include(l => l.User)
                 .Where(l => l.Grade == selectedGrade &&
                            l.User.SchoolId == currentSchoolId &&
+                           l.Status == "Active" &&
                            !enrolledIds.Contains(l.LearnerId))
                 .ToListAsync();
 

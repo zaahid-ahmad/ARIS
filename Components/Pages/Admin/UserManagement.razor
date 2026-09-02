@@ -40,11 +40,15 @@ else if (users.Count == 0)
 }
 else
 {
-    <div class="mb-3 mt-3 d-flex gap-2">
+    <div class="mb-3 mt-3 d-flex gap-2 align-items-center">
         <input class="form-control" placeholder="Search by name or email..."
                @bind="searchTerm" autocomplete="off" />
         <button class="btn btn-primary" @onclick="SearchUsers">Search</button>
         <button class="btn btn-secondary" @onclick="ClearSearch">Clear</button>
+        <div class="form-check ms-2 text-nowrap">
+            <input type="checkbox" class="form-check-input" id="includeGraduated" @bind="includeGraduated" />
+            <label class="form-check-label" for="includeGraduated">Include graduated learners</label>
+        </div>
     </div>
     <table class="table">
         <thead>
@@ -447,10 +451,15 @@ else
     private List<ImportRowResult>? importResults;
     private string? credentialsDownloadUrl;
 
+    private bool includeGraduated = false;
+
     private IEnumerable<User> FilteredUsers => users?
         .Where(u => string.IsNullOrWhiteSpace(searchTerm) ||
             u.Fullname.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
             u.Email!.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+        .Where(u => includeGraduated ||
+            !learnerByUserId.TryGetValue(u.Id, out var learner) ||
+            learner.Status != "Graduated")
         ?? Enumerable.Empty<User>();
 
     private int currentPage = 1;

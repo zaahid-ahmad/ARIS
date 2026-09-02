@@ -32,6 +32,7 @@ namespace ARIS1.Data
         public DbSet<WeightingNode> WeightingNodes { get; set; }
         public DbSet<GradeBand> GradeBands { get; set; }
         public DbSet<WeightingValidation> WeightingValidations { get; set; }
+        public DbSet<LearnerYearRecord> LearnerYearRecords { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -128,6 +129,11 @@ namespace ARIS1.Data
             builder.Entity<AttendanceRecord>()
                 .Property(a => a.Status)
                 .HasDefaultValue("Present");
+
+            // Learner status default — existing/new learners default to Active
+            builder.Entity<Learner>()
+                .Property(l => l.Status)
+                .HasDefaultValue("Active");
 
             // Fix cascade paths - tell SQL Server not to auto-delete
             builder.Entity<AttendanceSession>()
@@ -308,6 +314,23 @@ namespace ARIS1.Data
                 .WithMany(ws => ws.Validations)
                 .HasForeignKey(wv => wv.WeightingStructureId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // LearnerYearRecord relationships — append-only per-learner-per-year archive trail
+            builder.Entity<LearnerYearRecord>()
+                .HasOne(r => r.Learner)
+                .WithMany(l => l.YearRecords)
+                .HasForeignKey(r => r.LearnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<LearnerYearRecord>()
+                .HasOne(r => r.Class)
+                .WithMany()
+                .HasForeignKey(r => r.ClassId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<LearnerYearRecord>()
+                .HasIndex(r => new { r.LearnerId, r.AcademicYear })
+                .IsUnique();
         }
     }
 }
