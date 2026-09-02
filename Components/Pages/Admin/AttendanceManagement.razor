@@ -31,7 +31,7 @@
     </div>
     <div class="col-md-3">
         <label>Filter by Subject</label>
-        <select class="form-control" @bind="filterSubjectId" @bind:after="ResetPage">
+        <select class="form-control" @bind="filterSubjectId" @bind:after="OnFilterChanged">
             <option value="0">All Subjects</option>
             @foreach (var subject in subjectsForGrade)
             {
@@ -41,18 +41,22 @@
     </div>
     <div class="col-md-2">
         <label>From</label>
-        <input type="date" class="form-control" @bind="filterFrom" @bind:after="ResetPage" />
+        <input type="date" class="form-control" @bind="filterFrom" @bind:after="OnFilterChanged" />
     </div>
     <div class="col-md-2">
         <label>To</label>
-        <input type="date" class="form-control" @bind="filterTo" @bind:after="ResetPage" />
+        <input type="date" class="form-control" @bind="filterTo" @bind:after="OnFilterChanged" />
     </div>
     <div class="col-md-1 d-flex align-items-end">
         <button class="btn btn-outline-secondary" @onclick="ClearDateFilter">Clear</button>
     </div>
 </div>
 
-@if (FilteredSessions.Count == 0)
+@if (isLoading)
+{
+    <p class="text-muted">Loading...</p>
+}
+else if (pageRows.Count == 0)
 {
     <p class="text-muted">No attendance sessions found.</p>
 }
@@ -70,30 +74,32 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var session in PagedSessions)
+            @foreach (var row in pageRows)
             {
-                var isExpanded = expandedSessionIds.Contains(session.SessionId);
+                var isExpanded = expandedSessionIds.Contains(row.SessionId);
+                var isLoadingThis = loadingSessionIds.Contains(row.SessionId);
+                var records = expandedRecordsCache.GetValueOrDefault(row.SessionId, new List<RecordDetailVm>());
 
                 <tr>
-                    <td>@session.Date.ToString("dd MMM yyyy")</td>
-                    <td>@session.Time.ToString("HH:mm")</td>
-                    <td>@session.Subject?.Name</td>
-                    <td>@session.Teacher?.User?.Fullname</td>
-                    <td>@session.AttendanceRecords.Count</td>
+                    <td>@row.Date.ToString("dd MMM yyyy")</td>
+                    <td>@row.Time.ToString("HH:mm")</td>
+                    <td>@row.SubjectName</td>
+                    <td>@row.TeacherName</td>
+                    <td>@row.RecordCount</td>
                     <td class="text-nowrap">
                         <button class="btn btn-sm btn-outline-primary me-1"
-                                @onclick="() => ToggleExpand(session.SessionId)">
+                                @onclick="() => ToggleExpand(row.SessionId)">
                             @(isExpanded ? "Hide" : "View")
                         </button>
-                        @if (confirmDeleteSessionId == session.SessionId)
+                        @if (confirmDeleteSessionId == row.SessionId)
                         {
                             <span class="me-2 text-danger fw-bold">Delete this session and all its records?</span>
-                            <button class="btn btn-sm btn-danger me-1" @onclick="() => DeleteSession(session.SessionId)">Yes, Delete</button>
+                            <button class="btn btn-sm btn-danger me-1" @onclick="() => DeleteSession(row.SessionId)">Yes, Delete</button>
                             <button class="btn btn-sm btn-secondary" @onclick="CancelDelete">Cancel</button>
                         }
                         else
                         {
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => confirmDeleteSessionId = session.SessionId">Delete</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => confirmDeleteSessionId = row.SessionId">Delete</button>
                         }
                     </td>
                 </tr>
@@ -102,14 +108,18 @@ else
                 {
                     <tr class="table-light">
                         <td colspan="6" class="ps-4">
-                            @if (session.AttendanceRecords.Count == 0)
+                            @if (isLoadingThis)
+                            {
+                                <p class="text-muted mb-0">Loading...</p>
+                            }
+                            else if (records.Count == 0)
                             {
                                 <p class="text-muted mb-0">No records in this session.</p>
                             }
                             else
                             {
-                                var present = session.AttendanceRecords.Count(r => r.Status == "Present");
-                                var total = session.AttendanceRecords.Count;
+                                var present = records.Count(r => r.Status == "Present");
+                                var total = records.Count;
                                 <p class="mb-2">
                                     <strong>Present: @present / @total</strong>
                                 </p>
@@ -121,10 +131,10 @@ else
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        @foreach (var record in session.AttendanceRecords.OrderBy(r => r.Learner?.User?.Fullname))
+                                        @foreach (var record in records)
                                         {
                                             <tr>
-                                                <td>@record.Learner?.User?.Fullname</td>
+                                                <td>@record.LearnerName</td>
                                                 <td>
                                                     <span class="badge bg-@StatusColor(record.Status)">
                                                         @record.Status
@@ -147,8 +157,10 @@ else
 @code {
     private List<Subject> subjects = new();
     private List<Subject> subjectsForGrade = new();
-    private List<AttendanceSession> sessions = new();
+    private List<SessionRowVm> pageRows = new();
     private HashSet<int> expandedSessionIds = new();
+    private HashSet<int> loadingSessionIds = new();
+    private Dictionary<int, List<RecordDetailVm>> expandedRecordsCache = new();
     private int filterGrade = 0;
     private int filterSubjectId = 0;
     private DateTime? filterFrom;
@@ -157,19 +169,28 @@ else
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private int? schoolId;
+    private bool isLoading = true;
 
     private int currentPage = 1;
     private const int PageSize = 15;
-    private List<AttendanceSession> FilteredSessions => sessions
-        .Where(s => filterGrade == 0 || s.Subject?.Grade == filterGrade)
-        .Where(s => filterSubjectId == 0 || s.SubjectId == filterSubjectId)
-        .Where(s => filterFrom == null || s.Date.Date >= filterFrom.Value.Date)
-        .Where(s => filterTo == null || s.Date.Date <= filterTo.Value.Date)
-        .ToList();
-    private int totalPages => (int)Math.Ceiling(FilteredSessions.Count / (double)PageSize);
-    private List<AttendanceSession> PagedSessions => FilteredSessions.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
-    private void GoToPage(int page) => currentPage = page;
-    private void ResetPage() => currentPage = 1;
+    private int totalFilteredCount;
+    private int totalPages => (int)Math.Ceiling(totalFilteredCount / (double)PageSize);
+
+    private class SessionRowVm
+    {
+        public int SessionId { get; set; }
+        public DateTime Date { get; set; }
+        public TimeOnly Time { get; set; }
+        public string SubjectName { get; set; } = string.Empty;
+        public string TeacherName { get; set; } = string.Empty;
+        public int RecordCount { get; set; }
+    }
+
+    private class RecordDetailVm
+    {
+        public string LearnerName { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -201,42 +222,116 @@ else
         }
     }
 
+    // Filtering, ordering, and paging all happen in SQL — the query only ever pulls back the
+    // current page's rows (plus a scalar RecordCount per row, translated to a COUNT subquery,
+    // no AttendanceRecord entities materialized). Previously this loaded every session for the
+    // whole school — Riverside alone has 420 sessions / ~24,700 records — with the full
+    // AttendanceRecords→Learner→User graph eagerly included, on every page load and every
+    // filter change, then filtered and paged in memory. That's what made the page slow to open
+    // and slow to filter.
     private async Task LoadSessions()
     {
-        var subjectIds = subjects.Select(s => s.SubjectId).ToList();
+        if (schoolId == null) return;
 
-        sessions = await DbContext.AttendanceSessions
-            .Where(s => subjectIds.Contains(s.SubjectId))
-            .Include(s => s.Subject)
-            .Include(s => s.Teacher).ThenInclude(t => t.User)
-            .Include(s => s.AttendanceRecords)
-                .ThenInclude(r => r.Learner).ThenInclude(l => l.User)
-            .OrderByDescending(s => s.Date)
-            .ThenByDescending(s => s.Time)
-            .ToListAsync();
+        isLoading = true;
+        try
+        {
+            var subjectIds = subjects.Select(s => s.SubjectId).ToList();
+
+            var query = DbContext.AttendanceSessions
+                .AsNoTracking()
+                .Where(s => subjectIds.Contains(s.SubjectId))
+                .Where(s => filterGrade == 0 || s.Subject.Grade == filterGrade)
+                .Where(s => filterSubjectId == 0 || s.SubjectId == filterSubjectId)
+                .Where(s => filterFrom == null || s.Date.Date >= filterFrom.Value.Date)
+                .Where(s => filterTo == null || s.Date.Date <= filterTo.Value.Date);
+
+            totalFilteredCount = await query.CountAsync();
+
+            pageRows = await query
+                .OrderByDescending(s => s.Date)
+                .ThenByDescending(s => s.Time)
+                .Skip((currentPage - 1) * PageSize)
+                .Take(PageSize)
+                .Select(s => new SessionRowVm
+                {
+                    SessionId = s.SessionId,
+                    Date = s.Date,
+                    Time = s.Time,
+                    SubjectName = s.Subject.Name,
+                    TeacherName = s.Teacher.User.Fullname,
+                    RecordCount = s.AttendanceRecords.Count
+                })
+                .ToListAsync();
+        }
+        finally
+        {
+            isLoading = false;
+        }
     }
 
-    private void ClearDateFilter()
+    private async Task ClearDateFilter()
     {
         filterFrom = null;
         filterTo = null;
-        currentPage = 1;
+        await OnFilterChanged();
     }
 
-    private void OnGradeChanged(ChangeEventArgs e)
+    private async Task OnFilterChanged()
+    {
+        currentPage = 1;
+        await LoadSessions();
+    }
+
+    private async Task OnGradeChanged(ChangeEventArgs e)
     {
         filterGrade = int.TryParse(e.Value?.ToString(), out var g) ? g : 0;
         filterSubjectId = 0;
         subjectsForGrade = filterGrade == 0
             ? subjects
             : subjects.Where(s => s.Grade == filterGrade).ToList();
-        currentPage = 1;
+        await OnFilterChanged();
     }
 
-    private void ToggleExpand(int sessionId)
+    private async Task GoToPage(int page)
     {
-        if (!expandedSessionIds.Remove(sessionId))
-            expandedSessionIds.Add(sessionId);
+        currentPage = page;
+        await LoadSessions();
+    }
+
+    // Lazily loads one session's records (with Learner/User) only when it's actually expanded,
+    // cached after the first load so re-toggling doesn't re-query. Several sessions can be
+    // expanded at once, matching the original behavior.
+    private async Task ToggleExpand(int sessionId)
+    {
+        if (!expandedSessionIds.Add(sessionId))
+        {
+            expandedSessionIds.Remove(sessionId);
+            return;
+        }
+
+        if (expandedRecordsCache.ContainsKey(sessionId))
+            return;
+
+        loadingSessionIds.Add(sessionId);
+        try
+        {
+            expandedRecordsCache[sessionId] = await DbContext.AttendanceRecords
+                .AsNoTracking()
+                .Where(r => r.SessionId == sessionId)
+                .Include(r => r.Learner).ThenInclude(l => l.User)
+                .OrderBy(r => r.Learner.User.Fullname)
+                .Select(r => new RecordDetailVm
+                {
+                    LearnerName = r.Learner.User.Fullname,
+                    Status = r.Status
+                })
+                .ToListAsync();
+        }
+        finally
+        {
+            loadingSessionIds.Remove(sessionId);
+        }
     }
 
     private async Task DeleteSession(int sessionId)
@@ -265,8 +360,9 @@ else
             successMessage = "Session deleted successfully.";
             confirmDeleteSessionId = null;
             expandedSessionIds.Remove(sessionId);
+            expandedRecordsCache.Remove(sessionId);
+            if (currentPage > 1 && pageRows.Count == 1) currentPage--; // was the only row on this page
             await LoadSessions();
-            if (currentPage > totalPages && totalPages > 0) currentPage = totalPages;
         }
         catch (Exception ex)
         {

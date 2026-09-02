@@ -41,7 +41,7 @@
                    max="@DateTime.Today.ToString("yyyy-MM-dd")"
                    @bind="sessionDate" />
         </div>
-        <button class="btn btn-primary" @onclick="LoadLearners">Load Learners</button>
+        <button class="btn btn-primary" @onclick="() => LoadLearners()">Load Learners</button>
     </div>
 </div>
 
@@ -93,7 +93,7 @@
     <button class="btn btn-secondary mt-2 ms-2" @onclick="ClearForm">Cancel</button>
 }
 
-@if (pastSessions.Count > 0)
+@if (pastSessionRows.Count > 0)
 {
     <hr />
     <h5>Recent Sessions</h5>
@@ -108,15 +108,15 @@
             </tr>
         </thead>
         <tbody>
-            @foreach (var session in PagedSessions)
+            @foreach (var row in pastSessionRows)
             {
                 <tr>
-                    <td>@session.Date.ToString("dd MMM yyyy")</td>
-                    <td>@session.Time.ToString("HH:mm")</td>
-                    <td>@session.Subject?.Name</td>
-                    <td>@session.AttendanceRecords.Count</td>
+                    <td>@row.Date.ToString("dd MMM yyyy")</td>
+                    <td>@row.Time.ToString("HH:mm")</td>
+                    <td>@row.SubjectName</td>
+                    <td>@row.RecordCount</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-primary" @onclick="() => LoadSession(session)">
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => LoadSession(row)">
                             Edit
                         </button>
                     </td>
@@ -140,7 +140,7 @@
     private List<Learner> learners = new();
     private Dictionary<int, string> attendanceStatus = new();
     private HashSet<int> invalidStatuses = new();
-    private List<AttendanceSession> pastSessions = new();
+    private List<PastSessionVm> pastSessionRows = new();
     private AttendanceSession? existingSession;
     private int selectedSubjectId = 0;
     private DateTime sessionDate = DateTime.Today;
@@ -152,9 +152,24 @@
 
     private int sessionsPage = 1;
     private const int PageSize = 15;
-    private int sessionsTotalPages => (int)Math.Ceiling(pastSessions.Count / (double)PageSize);
-    private List<AttendanceSession> PagedSessions => pastSessions.Skip((sessionsPage - 1) * PageSize).Take(PageSize).ToList();
-    private void GoToSessionsPage(int page) => sessionsPage = page;
+    private int sessionsTotalCount;
+    private int sessionsTotalPages => (int)Math.Ceiling(sessionsTotalCount / (double)PageSize);
+
+    private class PastSessionVm
+    {
+        public int SessionId { get; set; }
+        public DateTime Date { get; set; }
+        public TimeOnly Time { get; set; }
+        public int SubjectId { get; set; }
+        public string SubjectName { get; set; } = string.Empty;
+        public int RecordCount { get; set; }
+    }
+
+    private async Task GoToSessionsPage(int page)
+    {
+        sessionsPage = page;
+        await LoadPastSessions();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -209,7 +224,17 @@
         }
     }
 
-    private async Task LoadLearners()
+    // editSessionId distinguishes the two ways this method gets called:
+    //  - null: the "Load Learners" button for a fresh capture — look for an existing session by
+    //    subject+date+*current* time, purely to guard against accidentally creating a second
+    //    session if the teacher re-clicks within the same minute.
+    //  - set: the "Edit" button on a specific row in "Recent Sessions" — that row already IS a
+    //    known session, so look it up directly by SessionId. Previously this reused the same
+    //    "match by current time" lookup as the fresh-capture path, which almost never matched a
+    //    past session (edited at a different wall-clock minute than it was created), silently
+    //    behaving like "New" instead of "Editing" and creating a duplicate session on Save
+    //    (issue #38).
+    private async Task LoadLearners(int? editSessionId = null)
     {
         try
         {
@@ -247,15 +272,21 @@
             attendanceStatus.Clear();
             invalidStatuses.Clear();
 
-            // Capture current time (hours+minutes) for new sessions
-            var now = new TimeOnly(DateTime.Now.Hour, DateTime.Now.Minute);
-
-            // Check for an existing session on this date+time for this subject
-            existingSession = await DbContext.AttendanceSessions
-                .Include(s => s.AttendanceRecords)
-                .FirstOrDefaultAsync(s => s.SubjectId == selectedSubjectId &&
-                                          s.Date.Date == sessionDate.Date &&
-                                          s.Time == now);
+            if (editSessionId.HasValue)
+            {
+                existingSession = await DbContext.AttendanceSessions
+                    .Include(s => s.AttendanceRecords)
+                    .FirstOrDefaultAsync(s => s.SessionId == editSessionId.Value);
+            }
+            else
+            {
+                var now = new TimeOnly(DateTime.Now.Hour, DateTime.Now.Minute);
+                existingSession = await DbContext.AttendanceSessions
+                    .Include(s => s.AttendanceRecords)
+                    .FirstOrDefaultAsync(s => s.SubjectId == selectedSubjectId &&
+                                              s.Date.Date == sessionDate.Date &&
+                                              s.Time == now);
+            }
 
             if (existingSession != null)
             {
@@ -268,7 +299,7 @@
             }
             else
             {
-                sessionTime = now;
+                sessionTime = new TimeOnly(DateTime.Now.Hour, DateTime.Now.Minute);
             }
         }
         catch (Exception ex)
@@ -277,12 +308,11 @@
         }
     }
 
-    private async Task LoadSession(AttendanceSession session)
+    private async Task LoadSession(PastSessionVm row)
     {
-        selectedSubjectId = session.SubjectId;
-        sessionDate = session.Date;
-        sessionTime = session.Time;
-        await LoadLearners();
+        selectedSubjectId = row.SubjectId;
+        sessionDate = row.Date;
+        await LoadLearners(row.SessionId);
     }
 
     private async Task SaveAttendance()
@@ -380,6 +410,7 @@
                 ? "Attendance updated successfully!"
                 : "Attendance saved successfully!";
 
+            sessionsPage = 1;
             await LoadPastSessions();
             ClearForm();
         }
@@ -390,19 +421,39 @@
         }
     }
 
+    // Filtering, ordering, and paging all happen in SQL — this previously loaded every session
+    // this teacher has ever run (with the full AttendanceRecords collection eagerly included
+    // just to display a count), unconditionally, on every page load. For a teacher with a few
+    // sections that's thousands of AttendanceRecord rows materialized to show a "Records"
+    // column. Now only the current page's rows are pulled, and RecordCount is a COUNT(*)
+    // subquery via the projection instead of a materialized collection.
     private async Task LoadPastSessions()
     {
         if (currentTeacher == null) return;
 
-        pastSessions = await DbContext.AttendanceSessions
+        var subjectIds = subjects.Select(s => s.SubjectId).ToList();
+
+        var query = DbContext.AttendanceSessions
             .AsNoTracking()
-            .Where(s => subjects.Select(sub => sub.SubjectId).Contains(s.SubjectId))
-            .Include(s => s.Subject)
-            .Include(s => s.AttendanceRecords)
+            .Where(s => subjectIds.Contains(s.SubjectId));
+
+        sessionsTotalCount = await query.CountAsync();
+
+        pastSessionRows = await query
             .OrderByDescending(s => s.Date)
             .ThenByDescending(s => s.Time)
+            .Skip((sessionsPage - 1) * PageSize)
+            .Take(PageSize)
+            .Select(s => new PastSessionVm
+            {
+                SessionId = s.SessionId,
+                Date = s.Date,
+                Time = s.Time,
+                SubjectId = s.SubjectId,
+                SubjectName = s.Subject.Name,
+                RecordCount = s.AttendanceRecords.Count
+            })
             .ToListAsync();
-        sessionsPage = 1;
     }
 
     private void ClearForm()
