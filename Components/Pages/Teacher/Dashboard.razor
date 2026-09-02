@@ -94,12 +94,12 @@ else
             <div class="col-md-4">
                 <div class="card mb-3" style="cursor: pointer;" @onclick='() => Navigation.NavigateTo("/teacher/atrisk")'>
                     <div class="card-header">
-                        <span class="card-title">@card.SubjectName</span>
+                        <span class="card-title">@card.SubjectName (Grade @card.Grade)</span>
                     </div>
                     <div class="card-body text-center">
                         @if (card.TotalLearners == 0)
                         {
-                            <svg width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="@($"{card.SubjectName} risk distribution")">
+                            <svg width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="@($"{card.SubjectName} (Grade {card.Grade}) risk distribution")">
                                 <circle cx="48" cy="48" r="40" fill="none" stroke="#e9ecef" stroke-width="12" />
                             </svg>
                             <p class="text-muted mt-2 mb-0">No learners enrolled</p>
@@ -107,7 +107,7 @@ else
                         else
                         {
                             <div style="position: relative; width: 96px; height: 96px; margin: 0 auto;">
-                                <svg width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="@($"{card.SubjectName} risk distribution")">
+                                <svg width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="@($"{card.SubjectName} (Grade {card.Grade}) risk distribution")">
                                     <circle cx="48" cy="48" r="40" fill="none" stroke="#e9ecef" stroke-width="12" />
                                     @{
                                         var circumference = 2 * Math.PI * 40;
@@ -158,6 +158,7 @@ else
     {
         public int SubjectId { get; set; }
         public string SubjectName { get; set; } = "";
+        public int Grade { get; set; }
         public int TotalLearners { get; set; }
         // Fixed order: Critical, High, Moderate, Low — matches the palette order everywhere else.
         public List<(string Level, int Count, string Color)> Bands { get; set; } = new();
@@ -251,6 +252,7 @@ else
             {
                 SubjectId = subject.SubjectId,
                 SubjectName = subject.Name,
+                Grade = subject.Grade,
                 TotalLearners = learnerIds.Count,
                 Bands = RiskLevelPalette.Select(p => (p.Level, levelCounts[p.Level], p.Color)).ToList()
             });
