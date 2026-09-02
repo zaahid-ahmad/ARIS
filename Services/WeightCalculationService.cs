@@ -13,117 +13,197 @@ namespace ARIS1.Services
             _context = context;
         }
 
+        private readonly record struct AssessmentInfo(int AssessmentTypeId, string TypeName, decimal MaxMark);
+        private readonly record struct LearnerMarkInfo(int AssessmentTypeId, decimal MarksAwarded, bool IsAbsent);
+        private readonly record struct GradeBandInfo(decimal MinPercentage, decimal MaxPercentage, int APSLevel);
+
         /// <summary>
         /// Calculates the weighted term mark for a learner in a subject for a specific term.
         /// Uses mark-based logic: divides weight across total marks available for each type.
         /// </summary>
         public async Task<WeightedTermResult> CalculateWeightedTermMark(int learnerId, int subjectId, int term)
         {
-            var result = new WeightedTermResult();
-
             try
             {
-                // Get the weighting structure for this subject/term
                 var weighting = await _context.WeightingStructures
+                    .AsNoTracking()
                     .Include(ws => ws.RootNodes)
                     .FirstOrDefaultAsync(ws => ws.SubjectId == subjectId && ws.Term == term);
+                var weightNodes = weighting?.RootNodes.ToList() ?? new List<WeightingNode>();
 
-                if (weighting == null || weighting.RootNodes.Count == 0)
-                {
-                    result.Error = "No weighting structure configured for this term.";
-                    return result;
-                }
-
-                // Get all assessments for this subject/term
                 var assessments = await _context.Assessments
+                    .AsNoTracking()
                     .Include(a => a.AssessmentType)
                     .Where(a => a.SubjectId == subjectId && a.Term == term)
+                    .Select(a => new AssessmentInfo(a.AssessmentTypeId, a.AssessmentType!.Name, a.MaxMark))
                     .ToListAsync();
 
-                if (assessments.Count == 0)
-                {
-                    result.Error = "No assessments found for this term.";
-                    return result;
-                }
-
-                // Get all learner marks for these assessments
                 var learnerMarks = await _context.LearnerMarks
+                    .AsNoTracking()
                     .Where(m => m.Assessment.SubjectId == subjectId &&
                                 m.Assessment.Term == term &&
                                 m.LearnerId == learnerId)
-                    .Include(m => m.Assessment)
+                    .Select(m => new LearnerMarkInfo(m.Assessment.AssessmentTypeId, m.MarksAwarded, m.IsAbsent))
                     .ToListAsync();
 
-                // Group assessments by AssessmentTypeId to calculate totals
-                var typeGroups = assessments.GroupBy(a => a.AssessmentTypeId).ToList();
-
-                decimal weightedTotal = 0m;
-                decimal totalWeight = 0m;
-                bool hasMarks = false;
-
-                foreach (var typeGroup in typeGroups)
-                {
-                    var assessmentTypeId = typeGroup.Key;
-                    var typeName = typeGroup.First().AssessmentType?.Name ?? "Unknown";
-
-                    // Get the weight for this assessment type
-                    var weightNode = weighting.RootNodes.FirstOrDefault(n => n.AssessmentTypeId == assessmentTypeId);
-                    if (weightNode == null)
-                        continue;
-
-                    decimal weight = weightNode.Weighting;
-
-                    // Calculate total marks available for this assessment type
-                    decimal totalMarksForType = typeGroup.Sum(a => a.MaxMark);
-
-                    // Get learner's total marks for this assessment type
-                    var marksForType = learnerMarks
-                        .Where(m => m.Assessment.AssessmentTypeId == assessmentTypeId)
-                        .Sum(m => m.IsAbsent ? 0m : m.MarksAwarded);
-
-                    // Calculate percentage for this type
-                    decimal percentageForType = totalMarksForType > 0
-                        ? (marksForType / totalMarksForType) * 100m
-                        : 0m;
-
-                    // Add to weighted total: (percentage × weight)
-                    decimal contributionToTerm = (percentageForType * weight) / 100m;
-                    weightedTotal += contributionToTerm;
-                    totalWeight += weight;
-
-                    result.TypeBreakdown.Add(new AssessmentTypeBreakdown
-                    {
-                        AssessmentTypeName = typeName,
-                        Weight = weight,
-                        TotalMarksAvailable = totalMarksForType,
-                        LearnerMarksEarned = marksForType,
-                        PercentageForType = percentageForType,
-                        ContributionToTerm = contributionToTerm
-                    });
-
-                    if (marksForType > 0)
-                        hasMarks = true;
-                }
-
-                // Validate that weights sum to 100%
-                if (Math.Abs(totalWeight - 100m) > 0.001m)
-                {
-                    result.Error = $"Weights do not sum to 100% (Total: {totalWeight}%). Please fix the weighting structure.";
-                    return result;
-                }
-
-                // Set results
-                result.WeightedPercentage = hasMarks ? weightedTotal : 0m;
-                result.APSLevel = GetAPSLevel(subjectId, result.WeightedPercentage);
-                result.IsSuccessful = true;
-
-                return result;
+                // Unchanged from before this method was split for batching: still the existing
+                // synchronous per-call GetAPSLevel (known issue #19, not addressed here).
+                return BuildWeightedTermResult(weightNodes, assessments, learnerMarks,
+                    pct => GetAPSLevel(subjectId, pct));
             }
             catch (Exception ex)
             {
-                result.Error = $"Error calculating weighted mark: {ex.Message}";
+                return new WeightedTermResult { Error = $"Error calculating weighted mark: {ex.Message}" };
+            }
+        }
+
+        /// <summary>
+        /// Batched version of CalculateWeightedTermMark for every learner in one subject/term —
+        /// a handful of DB round trips total instead of ~3 per learner. Produces identical
+        /// results to calling CalculateWeightedTermMark once per learner. Introduced for
+        /// RiskAssessmentService.CalculateRiskScoresForSubject, which walks every learner in a
+        /// subject and would otherwise reintroduce the exact N+1 pattern already fixed there.
+        /// </summary>
+        public async Task<Dictionary<int, WeightedTermResult>> CalculateWeightedTermMarksForSubject(int subjectId, int term, List<int> learnerIds)
+        {
+            var results = new Dictionary<int, WeightedTermResult>();
+            if (learnerIds.Count == 0) return results;
+
+            var weighting = await _context.WeightingStructures
+                .AsNoTracking()
+                .Include(ws => ws.RootNodes)
+                .FirstOrDefaultAsync(ws => ws.SubjectId == subjectId && ws.Term == term);
+            var weightNodes = weighting?.RootNodes.ToList() ?? new List<WeightingNode>();
+
+            var assessments = await _context.Assessments
+                .AsNoTracking()
+                .Include(a => a.AssessmentType)
+                .Where(a => a.SubjectId == subjectId && a.Term == term)
+                .Select(a => new AssessmentInfo(a.AssessmentTypeId, a.AssessmentType!.Name, a.MaxMark))
+                .ToListAsync();
+
+            var marksLookup = (await _context.LearnerMarks
+                    .AsNoTracking()
+                    .Where(m => m.Assessment.SubjectId == subjectId && m.Assessment.Term == term && learnerIds.Contains(m.LearnerId))
+                    .Select(m => new { m.LearnerId, m.Assessment.AssessmentTypeId, m.MarksAwarded, m.IsAbsent })
+                    .ToListAsync())
+                .GroupBy(m => m.LearnerId)
+                .ToDictionary(g => g.Key, g => g.Select(x => new LearnerMarkInfo(x.AssessmentTypeId, x.MarksAwarded, x.IsAbsent)).ToList());
+
+            // Grade bands loaded once and looked up in memory below, rather than one blocking
+            // query per learner (what GetAPSLevel would otherwise do inside this loop).
+            var gradeBands = await _context.GradeBands
+                .AsNoTracking()
+                .Where(gb => gb.SubjectId == subjectId)
+                .Select(gb => new GradeBandInfo(gb.MinPercentage, gb.MaxPercentage, gb.APSLevel))
+                .ToListAsync();
+
+            foreach (var learnerId in learnerIds)
+            {
+                var learnerMarks = marksLookup.GetValueOrDefault(learnerId, new List<LearnerMarkInfo>());
+                results[learnerId] = BuildWeightedTermResult(weightNodes, assessments, learnerMarks,
+                    pct => GetApsLevelFromBands(gradeBands, pct));
+            }
+
+            return results;
+        }
+
+        // Single source of truth for the per-type weighted-sum math — shared by the one-learner
+        // and batched paths above so they can never drift apart.
+        private static WeightedTermResult BuildWeightedTermResult(
+            List<WeightingNode> weightNodes,
+            List<AssessmentInfo> assessments,
+            List<LearnerMarkInfo> learnerMarks,
+            Func<decimal, int> getApsLevel)
+        {
+            var result = new WeightedTermResult();
+
+            if (weightNodes.Count == 0)
+            {
+                result.Error = "No weighting structure configured for this term.";
                 return result;
             }
+
+            if (assessments.Count == 0)
+            {
+                result.Error = "No assessments found for this term.";
+                return result;
+            }
+
+            var typeGroups = assessments.GroupBy(a => a.AssessmentTypeId).ToList();
+
+            decimal weightedTotal = 0m;
+            decimal totalWeight = 0m;
+            bool hasMarks = false;
+
+            foreach (var typeGroup in typeGroups)
+            {
+                var assessmentTypeId = typeGroup.Key;
+                var typeName = typeGroup.First().TypeName;
+
+                var weightNode = weightNodes.FirstOrDefault(n => n.AssessmentTypeId == assessmentTypeId);
+                if (weightNode == null)
+                    continue;
+
+                decimal weight = weightNode.Weighting;
+                decimal totalMarksForType = typeGroup.Sum(a => a.MaxMark);
+
+                var marksForType = learnerMarks
+                    .Where(m => m.AssessmentTypeId == assessmentTypeId)
+                    .Sum(m => m.IsAbsent ? 0m : m.MarksAwarded);
+
+                decimal percentageForType = totalMarksForType > 0
+                    ? (marksForType / totalMarksForType) * 100m
+                    : 0m;
+
+                decimal contributionToTerm = (percentageForType * weight) / 100m;
+                weightedTotal += contributionToTerm;
+                totalWeight += weight;
+
+                result.TypeBreakdown.Add(new AssessmentTypeBreakdown
+                {
+                    AssessmentTypeName = typeName,
+                    Weight = weight,
+                    TotalMarksAvailable = totalMarksForType,
+                    LearnerMarksEarned = marksForType,
+                    PercentageForType = percentageForType,
+                    ContributionToTerm = contributionToTerm
+                });
+
+                if (marksForType > 0)
+                    hasMarks = true;
+            }
+
+            if (Math.Abs(totalWeight - 100m) > 0.001m)
+            {
+                result.Error = $"Weights do not sum to 100% (Total: {totalWeight}%). Please fix the weighting structure.";
+                return result;
+            }
+
+            result.WeightedPercentage = hasMarks ? weightedTotal : 0m;
+            result.APSLevel = getApsLevel(result.WeightedPercentage);
+            result.IsSuccessful = true;
+            return result;
+        }
+
+        private static int GetApsLevelFromBands(List<GradeBandInfo> bands, decimal percentage)
+        {
+            foreach (var band in bands)
+            {
+                if (band.MinPercentage <= percentage && band.MaxPercentage >= percentage)
+                    return band.APSLevel;
+            }
+
+            return percentage switch
+            {
+                >= 80m => 7,
+                >= 70m => 6,
+                >= 60m => 5,
+                >= 50m => 4,
+                >= 40m => 3,
+                >= 30m => 2,
+                _ => 0
+            };
         }
 
         /// <summary>
