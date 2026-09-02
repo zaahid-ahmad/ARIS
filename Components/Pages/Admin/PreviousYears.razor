@@ -146,8 +146,20 @@ else
                         @foreach (var subject in detailSubjects)
                         {
                             var marks = detailMarksCache.GetValueOrDefault(subject.SubjectId, new List<MarkInfo>());
+                            var risk = detailRiskCache.GetValueOrDefault(subject.SubjectId);
                             <div class="card mb-4">
-                                <div class="card-header"><h6 class="mb-0">@subject.Name</h6></div>
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0">@subject.Name</h6>
+                                    @if (risk != null)
+                                    {
+                                        var badgeClass = risk.Level == "Critical" ? "danger" :
+                                            risk.Level == "High" ? "warning" : risk.Level == "Moderate" ? "info" : "success";
+                                        <span class="badge bg-@badgeClass">
+                                            @risk.Level — Score @risk.Score.ToString("F1")
+                                            (Academic @risk.AcademicAverage.ToString("F1")%, Attendance @risk.AttendancePercentage.ToString("F1")%)
+                                        </span>
+                                    }
+                                </div>
                                 <div class="card-body">
                                     @if (marks.Count == 0)
                                     {
@@ -208,6 +220,7 @@ else
     private bool isLoadingDetail;
     private List<Subject> detailSubjects = new();
     private Dictionary<int, List<MarkInfo>> detailMarksCache = new();
+    private Dictionary<int, LearnerYearSubjectRisk> detailRiskCache = new();
 
     private class YearSummaryVm
     {
@@ -354,8 +367,15 @@ else
                 marksCache[subject.SubjectId] = marks;
             }
 
+            var subjectIds = subjects.Select(s => s.SubjectId).ToList();
+            var riskCache = await DbContext.LearnerYearSubjectRisks
+                .AsNoTracking()
+                .Where(r => r.LearnerId == learnerId && subjectIds.Contains(r.SubjectId))
+                .ToDictionaryAsync(r => r.SubjectId);
+
             detailSubjects = subjects;
             detailMarksCache = marksCache;
+            detailRiskCache = riskCache;
         }
         catch (Exception ex)
         {
@@ -372,5 +392,6 @@ else
         selectedLearnerId = null;
         detailSubjects = new();
         detailMarksCache = new();
+        detailRiskCache = new();
     }
 }

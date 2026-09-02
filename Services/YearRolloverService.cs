@@ -30,10 +30,12 @@ namespace ARIS1.Services
     public class YearRolloverService
     {
         private readonly AppDbContext _dbContext;
+        private readonly RiskAssessmentService _riskAssessmentService;
 
-        public YearRolloverService(AppDbContext dbContext)
+        public YearRolloverService(AppDbContext dbContext, RiskAssessmentService riskAssessmentService)
         {
             _dbContext = dbContext;
+            _riskAssessmentService = riskAssessmentService;
         }
 
         public async Task<RolloverPreview> PreviewAsync(int schoolId)
@@ -105,6 +107,33 @@ namespace ARIS1.Services
             var enrollmentsByLearner = oldEnrollments
                 .GroupBy(e => e.LearnerId)
                 .ToDictionary(g => g.Key, g => g.ToList());
+
+            // Freeze a risk-score snapshot per (learner, subject) as this year closes out — one
+            // batched CalculateRiskScoresForSubject call per distinct subject among the group,
+            // same batching discipline as everywhere else risk scores are computed. This is what
+            // Admin/PreviousYears.razor reads back later; it's independent of Promote/Repeat/
+            // Graduate — every learner's ending-year subjects get a frozen snapshot regardless of
+            // what happens to them next.
+            foreach (var subjectGroup in oldEnrollments.GroupBy(e => e.SubjectId))
+            {
+                var subjectLearnerIds = subjectGroup.Select(e => e.LearnerId).ToList();
+                var riskScores = await _riskAssessmentService.CalculateRiskScoresForSubject(subjectGroup.Key, subjectLearnerIds);
+
+                foreach (var learnerId in subjectLearnerIds)
+                {
+                    var risk = riskScores[learnerId];
+                    _dbContext.LearnerYearSubjectRisks.Add(new LearnerYearSubjectRisk
+                    {
+                        LearnerId = learnerId,
+                        SubjectId = subjectGroup.Key,
+                        AcademicYear = endingYear,
+                        Score = risk.Score,
+                        Level = risk.Level,
+                        AcademicAverage = risk.AcademicAverage,
+                        AttendancePercentage = risk.AttendancePercentage
+                    });
+                }
+            }
 
             // (Grade, Name) -> cloned new-year Subject, for matching a learner's old enrollments forward.
             var newSubjectsByGradeName = subjectMap.Values

@@ -29,9 +29,14 @@ namespace ARIS1.Services
 
         public async Task<RiskData> CalculateRiskScore(int learnerId, int subjectId)
         {
+            // Scoped to this subject (and therefore this academic year, since each year's
+            // Subject is a distinct row with its own AttendanceSessions) — not the learner's
+            // entire attendance history across every subject they've ever taken. A repeated or
+            // promoted year starts with zero attendance records against the new Subject, so this
+            // resets cleanly at the start of every new year instead of blending old years in.
             var attendanceStatuses = await _dbContext.AttendanceRecords
                 .AsNoTracking()
-                .Where(ar => ar.LearnerId == learnerId)
+                .Where(ar => ar.LearnerId == learnerId && ar.Session.SubjectId == subjectId)
                 .Select(ar => ar.Status)
                 .ToListAsync();
 
@@ -89,9 +94,10 @@ namespace ARIS1.Services
             var results = new Dictionary<int, RiskData>();
             if (learnerIds.Count == 0) return results;
 
+            // Scoped to this subject — see the single-learner method's comment for why.
             var attendanceLookup = (await _dbContext.AttendanceRecords
                     .AsNoTracking()
-                    .Where(ar => learnerIds.Contains(ar.LearnerId))
+                    .Where(ar => learnerIds.Contains(ar.LearnerId) && ar.Session.SubjectId == subjectId)
                     .Select(ar => new { ar.LearnerId, ar.Status })
                     .ToListAsync())
                 .GroupBy(ar => ar.LearnerId)

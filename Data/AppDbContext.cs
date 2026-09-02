@@ -33,6 +33,7 @@ namespace ARIS1.Data
         public DbSet<GradeBand> GradeBands { get; set; }
         public DbSet<WeightingValidation> WeightingValidations { get; set; }
         public DbSet<LearnerYearRecord> LearnerYearRecords { get; set; }
+        public DbSet<LearnerYearSubjectRisk> LearnerYearSubjectRisks { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -331,6 +332,35 @@ namespace ARIS1.Data
             builder.Entity<LearnerYearRecord>()
                 .HasIndex(r => new { r.LearnerId, r.AcademicYear })
                 .IsUnique();
+
+            // LearnerYearSubjectRisk — frozen risk-score snapshot per learner per subject-year
+            builder.Entity<LearnerYearSubjectRisk>()
+                .HasOne(r => r.Learner)
+                .WithMany()
+                .HasForeignKey(r => r.LearnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<LearnerYearSubjectRisk>()
+                .HasOne(r => r.Subject)
+                .WithMany()
+                .HasForeignKey(r => r.SubjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<LearnerYearSubjectRisk>()
+                .HasIndex(r => new { r.LearnerId, r.SubjectId })
+                .IsUnique();
+
+            builder.Entity<LearnerYearSubjectRisk>()
+                .Property(r => r.Score)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<LearnerYearSubjectRisk>()
+                .Property(r => r.AcademicAverage)
+                .HasColumnType("decimal(10,4)");
+
+            builder.Entity<LearnerYearSubjectRisk>()
+                .Property(r => r.AttendancePercentage)
+                .HasColumnType("decimal(10,4)");
         }
     }
 }
