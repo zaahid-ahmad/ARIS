@@ -46,10 +46,11 @@ namespace ARIS1.Services
                     .Select(m => new LearnerMarkInfo(m.Assessment.AssessmentTypeId, m.MarksAwarded, m.IsAbsent))
                     .ToListAsync();
 
-                // Unchanged from before this method was split for batching: still the existing
-                // synchronous per-call GetAPSLevel (known issue #19, not addressed here).
-                return BuildWeightedTermResult(weightNodes, assessments, learnerMarks,
-                    pct => GetAPSLevel(subjectId, pct));
+                var result = BuildWeightedTermResult(weightNodes, assessments, learnerMarks, _ => 0);
+                if (result.IsSuccessful)
+                    result.APSLevel = await GetAPSLevel(subjectId, result.WeightedPercentage);
+
+                return result;
             }
             catch (Exception ex)
             {
@@ -263,7 +264,7 @@ namespace ARIS1.Services
                 }
 
                 result.YearPercentage = hasAnyData ? yearPercentage : 0m;
-                result.APSLevel = GetAPSLevel(subjectId, result.YearPercentage);
+                result.APSLevel = await GetAPSLevel(subjectId, result.YearPercentage);
                 result.IsSuccessful = true;
                 return result;
             }
@@ -341,12 +342,12 @@ namespace ARIS1.Services
         /// Gets the APS level (0-7) based on percentage using the GradeBand configuration.
         /// Falls back to default bands if custom bands not configured.
         /// </summary>
-        private int GetAPSLevel(int subjectId, decimal percentage)
+        private async Task<int> GetAPSLevel(int subjectId, decimal percentage)
         {
             // Try to find custom grade bands for this subject
-            var gradeBand = _context.GradeBands
+            var gradeBand = await _context.GradeBands
                 .AsNoTracking()
-                .FirstOrDefault(gb => gb.SubjectId == subjectId &&
+                .FirstOrDefaultAsync(gb => gb.SubjectId == subjectId &&
                                       gb.MinPercentage <= percentage &&
                                       gb.MaxPercentage >= percentage);
 

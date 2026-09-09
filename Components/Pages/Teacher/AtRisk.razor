@@ -309,10 +309,15 @@ else
                 return;
             }
 
-            // Only load subjects from this teacher's school
+            var currentYear = await DbContext.Subjects
+                .Where(s => s.SchoolId == currentSchoolId)
+                .Select(s => (int?)s.AcademicYear)
+                .MaxAsync() ?? DateTime.Now.Year;
+
+            // Only load subjects from this teacher's school, for the current academic year
             subjects = await DbContext.Subjects
                 .AsNoTracking()
-                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)  // ← Filter by school
+                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId && s.AcademicYear == currentYear)
                 .ToListAsync();
         }
         catch (Exception ex)

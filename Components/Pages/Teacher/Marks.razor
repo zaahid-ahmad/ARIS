@@ -242,9 +242,14 @@
                 return;
             }
 
+            var currentYear = await DbContext.Subjects
+                .Where(s => s.SchoolId == currentSchoolId)
+                .Select(s => (int?)s.AcademicYear)
+                .MaxAsync() ?? DateTime.Now.Year;
+
             subjects = await DbContext.Subjects
                 .AsNoTracking()
-                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId)
+                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId && s.AcademicYear == currentYear)
                 .ToListAsync();
         }
         catch (Exception ex)
