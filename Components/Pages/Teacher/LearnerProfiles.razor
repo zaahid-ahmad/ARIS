@@ -11,6 +11,7 @@
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ARIS1.Services.WeightCalculationService WeightCalculationService
+@inject ARIS1.Services.RiskAssessmentService RiskAssessment
 
 
 @if (!string.IsNullOrEmpty(errorMessage))
@@ -112,9 +113,20 @@ else
                     {
                         @foreach (var subject in learnerSubjects)
                         {
+                            var risk = subjectRiskCache.GetValueOrDefault(subject.SubjectId);
+
                             <div class="card mb-4">
                                 <div class="card-header">
-                                    <h6 class="mb-0">@subject.Name <span class="badge bg-secondary ms-2">Grade @subject.Grade</span></h6>
+                                    <h6 class="mb-0">
+                                        @subject.Name
+                                        <span class="badge bg-secondary ms-2">Grade @subject.Grade</span>
+                                        @if (risk != null)
+                                        {
+                                            <span class="badge ms-2" style="background-color:@RiskColor(risk.Level); color:@RiskTextColor(risk.Level);">
+                                                @risk.Score.ToString("F0") &middot; @risk.Level
+                                            </span>
+                                        }
+                                    </h6>
                                 </div>
                                 <div class="card-body">
                                     @{
@@ -284,6 +296,7 @@ else
     private Dictionary<int, List<AssessmentMarkInfo>> assessmentMarksCache = new();
     private Dictionary<int, List<Subject>> learnerSubjectsCache = new();
     private Dictionary<int, SubjectMarkSummary> subjectMarkSummaryCache = new();
+    private Dictionary<int, ARIS1.Services.RiskData> subjectRiskCache = new();
 
     private class AssessmentMarkInfo
     {
@@ -407,6 +420,23 @@ else
         }
     }
 
+    // Same palette used in Teacher/AtRisk.razor's scatter chart and Teacher/Dashboard.razor's
+    // risk donuts — duplicated locally rather than shared, matching this codebase's convention
+    // for small per-page color helpers (e.g. Learner/Dashboard.razor's/Parent/Overview.razor's
+    // duplicated GetLevelColors).
+    private static string RiskColor(string level) => level switch
+    {
+        "Critical" => "#d03b3b",
+        "High" => "#ec835a",
+        "Moderate" => "#fab219",
+        _ => "#0ca30c" // Low
+    };
+
+    // Moderate's amber (#fab219) is too light for white text to read well — dark text there,
+    // white everywhere else. The score+level text is shown regardless of color, consistent with
+    // this app's "never rely on hue alone" convention (see AtRisk.razor's scatter chart).
+    private static string RiskTextColor(string level) => level == "Moderate" ? "#212529" : "#fff";
+
     private void OnGradeChanged()
     {
         SearchLearners();
@@ -496,6 +526,7 @@ else
             }
 
             var summaryCache = new Dictionary<int, SubjectMarkSummary>();
+            var riskCache = new Dictionary<int, ARIS1.Services.RiskData>();
             foreach (var subject in subjects)
             {
                 var summary = new SubjectMarkSummary();
@@ -516,12 +547,15 @@ else
                     summary.YearMark = yearResult;
 
                 summaryCache[subject.SubjectId] = summary;
+
+                riskCache[subject.SubjectId] = await RiskAssessment.CalculateRiskScore(learner.LearnerId, subject.SubjectId);
             }
 
             learnerSubjects = subjects;
             learnerInterventions = interventions;
             assessmentMarksCache = marksCache;
             subjectMarkSummaryCache = summaryCache;
+            subjectRiskCache = riskCache;
         }
         catch (Exception ex)
         {
@@ -533,6 +567,7 @@ else
             learnerInterventions = new();
             assessmentMarksCache = new();
             subjectMarkSummaryCache = new();
+            subjectRiskCache = new();
             errorMessage = $"Error loading profile: {ex.Message}";
         }
         finally
