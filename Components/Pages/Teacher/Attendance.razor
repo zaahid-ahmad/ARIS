@@ -331,6 +331,15 @@
             return;
         }
 
+        // Re-validate server-side rather than trusting the bound value alone — selectedSubjectId
+        // could have changed since LoadLearners() last checked it (that check doesn't re-run at
+        // save time), and a tampered bind payload could otherwise reference a foreign subject.
+        if (!subjects.Any(s => s.SubjectId == selectedSubjectId))
+        {
+            errorMessage = "Subject not found.";
+            return;
+        }
+
         // Validate all statuses are set
         invalidStatuses.Clear();
         foreach (var learner in learners)

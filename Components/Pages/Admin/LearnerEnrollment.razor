@@ -237,6 +237,14 @@
         {
             if (selectedSubjectId == 0 || selectedGrade == 0) return;
 
+            // Re-validate server-side rather than trusting the dropdown's bound value alone —
+            // a tampered bind payload could otherwise reference a subject from another school.
+            if (!allSubjects.Any(s => s.SubjectId == selectedSubjectId))
+            {
+                errorMessage = "Subject not found.";
+                return;
+            }
+
             // Load enrolled learners
             enrolledLearners = await DbContext.LearnerSubjects
                 .AsNoTracking()
@@ -275,6 +283,14 @@
             errorMessage = string.Empty;
             successMessage = string.Empty;
 
+            // Re-validate server-side rather than trusting the dropdown's bound value alone —
+            // a tampered bind payload could otherwise reference a subject from another school.
+            if (!allSubjects.Any(s => s.SubjectId == selectedSubjectId))
+            {
+                errorMessage = "Subject not found.";
+                return;
+            }
+
             var enrollment = new LearnerSubject
             {
                 LearnerId = learner.LearnerId,
@@ -300,6 +316,14 @@
         {
             errorMessage = string.Empty;
             successMessage = string.Empty;
+
+            // Re-validate server-side rather than trusting the dropdown's bound value alone —
+            // a tampered bind payload could otherwise reference a subject from another school.
+            if (!allSubjects.Any(s => s.SubjectId == selectedSubjectId))
+            {
+                errorMessage = "Subject not found.";
+                return;
+            }
 
             var enrollment = await DbContext.LearnerSubjects
                 .FirstOrDefaultAsync(ls =>

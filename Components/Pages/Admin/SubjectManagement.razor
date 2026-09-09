@@ -998,6 +998,10 @@ else
 
         if (teacherId == 0)
         { teacherIdError = "Please select a teacher."; valid = false; }
+        // Re-validate server-side rather than trusting the dropdown's bound value alone —
+        // a tampered bind payload could otherwise reference a teacher from another school.
+        else if (teachers?.Any(t => t.TeacherId == teacherId) != true)
+        { teacherIdError = "Selected teacher is invalid."; valid = false; }
 
         if (academicYear < 2020 || academicYear > DateTime.Now.Year + 1)
         { yearError = $"Year must be between 2020 and {DateTime.Now.Year + 1}."; valid = false; }
@@ -1053,6 +1057,10 @@ else
 
         if (editTeacherId == 0)
         { editTeacherError = "Please select a teacher."; valid = false; }
+        // Re-validate server-side rather than trusting the dropdown's bound value alone —
+        // a tampered bind payload could otherwise reference a teacher from another school.
+        else if (teachers?.Any(t => t.TeacherId == editTeacherId) != true)
+        { editTeacherError = "Selected teacher is invalid."; valid = false; }
 
         if (editAcademicYear < 2020 || editAcademicYear > DateTime.Now.Year + 1)
         { editYearError = $"Year must be between 2020 and {DateTime.Now.Year + 1}."; valid = false; }
@@ -1867,6 +1875,20 @@ else
         {
             yearWeightError = validation.Message;
             return;
+        }
+
+        // Re-validate every AssessmentType node's bound id server-side rather than trusting it
+        // alone — the <select> options are scoped to this subject, but a tampered bind payload
+        // could otherwise reference an assessment type belonging to a different subject/school.
+        var allYearNodes = yearStructure.RootNodes.Concat(yearStructure.RootNodes.SelectMany(r => r.ChildNodes));
+        foreach (var node in allYearNodes)
+        {
+            if (node.NodeType == "AssessmentType" &&
+                (!node.AssessmentTypeId.HasValue || !yearAssessmentTypes.Any(at => at.AssessmentTypeId == node.AssessmentTypeId)))
+            {
+                yearWeightError = "One of the Assessment Type nodes references an assessment type that isn't part of this subject.";
+                return;
+            }
         }
 
         try

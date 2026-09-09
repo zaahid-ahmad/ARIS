@@ -99,6 +99,15 @@ namespace ARIS1.Services
                 .Where(l => learnerIds.Contains(l.LearnerId))
                 .ToDictionaryAsync(l => l.LearnerId);
 
+            // Re-validate every promoted learner's target class id server-side rather than
+            // trusting it alone — the wizard's per-row <select> options are scoped to this
+            // school, but a tampered bind payload could otherwise reference a class belonging
+            // to a different school.
+            var validClassIds = await _dbContext.SchoolClasses
+                .Where(c => c.SchoolId == schoolId)
+                .Select(c => c.ClassId)
+                .ToHashSetAsync();
+
             var oldEnrollments = await _dbContext.LearnerSubjects
                 .Where(ls => learnerIds.Contains(ls.LearnerId) && ls.Subject.AcademicYear == endingYear)
                 .Select(ls => new { ls.LearnerId, ls.SubjectId, SubjectName = ls.Subject.Name })
@@ -179,6 +188,8 @@ namespace ARIS1.Services
                 {
                     if (choice.TargetClassId == null)
                         throw new InvalidOperationException($"Learner {learner.LearnerId} has no target class resolved for promotion.");
+                    if (!validClassIds.Contains(choice.TargetClassId.Value))
+                        throw new InvalidOperationException($"Learner {learner.LearnerId} has no valid target class resolved for promotion.");
                     newClassId = choice.TargetClassId.Value;
                     promoted++;
                 }
