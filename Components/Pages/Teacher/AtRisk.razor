@@ -199,6 +199,9 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "subject")]
+    public int SubjectIdFromQuery { get; set; }
+
     private List<Subject> subjects = new();
     private List<Learner> allLearnersInSubject = new();
     private List<Learner> atRiskLearners = new();
@@ -319,6 +322,15 @@ else
                 .AsNoTracking()
                 .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId && s.AcademicYear == currentYear)
                 .ToListAsync();
+
+            // Deep-linked from a specific subject (e.g. Teacher/Dashboard.razor's risk-donut
+            // cards) — pre-select it and load immediately instead of leaving the teacher to
+            // reselect a subject they already came from.
+            if (SubjectIdFromQuery > 0 && subjects.Any(s => s.SubjectId == SubjectIdFromQuery))
+            {
+                selectedSubjectId = SubjectIdFromQuery;
+                await LoadAtRiskLearners();
+            }
         }
         catch (Exception ex)
         {

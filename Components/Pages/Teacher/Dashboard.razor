@@ -92,7 +92,7 @@ else
         @foreach (var card in subjectRiskCards)
         {
             <div class="col-md-4">
-                <div class="card mb-3" style="cursor: pointer;" @onclick='() => Navigation.NavigateTo("/teacher/atrisk")'>
+                <div class="card mb-3" style="cursor: pointer;" @onclick='() => Navigation.NavigateTo($"/teacher/atrisk?subject={card.SubjectId}")'>
                     <div class="card-header">
                         <span class="card-title">@card.SubjectName (Grade @card.Grade)</span>
                     </div>
