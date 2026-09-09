@@ -101,7 +101,8 @@
                                         <td>@learner.User?.Fullname</td>
                                         <td>
                                             <button class="btn btn-danger btn-sm"
-                                                    @onclick="() => UnenrollLearner(learner)">
+                                                    @onclick="() => UnenrollLearner(learner)"
+                                                    disabled="@isProcessing">
                                                 Remove
                                             </button>
                                         </td>
@@ -141,7 +142,8 @@
                                         <td>@learner.User?.Fullname</td>
                                         <td>
                                             <button class="btn btn-success btn-sm"
-                                                    @onclick="() => EnrollLearner(learner)">
+                                                    @onclick="() => EnrollLearner(learner)"
+                                                    disabled="@isProcessing">
                                                 Enroll
                                             </button>
                                         </td>
@@ -165,6 +167,11 @@
     private int selectedGrade = 0;
     private int selectedSubjectId = 0;
     private bool hasLoaded = false;
+    // Guards EnrollLearner/UnenrollLearner against a genuinely rapid double-click: without this,
+    // two overlapping calls can share the same scoped DbContext for concurrent async operations,
+    // which EF Core does not support and throws its own exception for — same reentrancy-guard
+    // house style as ClassManagement.razor's isProcessing.
+    private bool isProcessing = false;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private int? currentSchoolId;
@@ -278,6 +285,9 @@
 
     private async Task EnrollLearner(Learner learner)
     {
+        if (isProcessing) return;
+        isProcessing = true;
+
         try
         {
             errorMessage = string.Empty;
@@ -288,6 +298,18 @@
             if (!allSubjects.Any(s => s.SubjectId == selectedSubjectId))
             {
                 errorMessage = "Subject not found.";
+                return;
+            }
+
+            // Check before insert rather than letting the LearnerSubject composite-key violation
+            // reach the catch block below as a raw SQL exception — same idea as
+            // BulkSubjectAllocationService.GetExistingPairsAsync, applied to the single-learner path.
+            var alreadyEnrolled = await DbContext.LearnerSubjects
+                .AnyAsync(ls => ls.LearnerId == learner.LearnerId && ls.SubjectId == selectedSubjectId);
+
+            if (alreadyEnrolled)
+            {
+                errorMessage = $"{learner.User?.Fullname} is already enrolled in this subject.";
                 return;
             }
 
@@ -308,10 +330,17 @@
         {
             errorMessage = $"Error enrolling learner: {ex.Message}";
         }
+        finally
+        {
+            isProcessing = false;
+        }
     }
 
     private async Task UnenrollLearner(Learner learner)
     {
+        if (isProcessing) return;
+        isProcessing = true;
+
         try
         {
             errorMessage = string.Empty;
@@ -341,6 +370,10 @@
         catch (Exception ex)
         {
             errorMessage = $"Error removing learner: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
         }
     }
 }
