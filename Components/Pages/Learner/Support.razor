@@ -21,7 +21,7 @@
 <div class="row">
     <!-- LEFT COLUMN: AREAS OF CONCERN -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header bg-primary text-white">
                 <h5>Areas of Concern</h5>
             </div>
@@ -72,14 +72,14 @@
 
     <!-- RIGHT COLUMN: CHATBOT -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header bg-success text-white">
                 <h5>AI Learning Assistant</h5>
                 <small>Get personalized study tips</small>
             </div>
-            <div class="card-body">
-                <!-- Chat Messages -->
-                <div @ref="chatContainer" style="height: 300px; overflow-y: auto; border: 1px solid #dee2e6; padding: 1rem; border-radius: 5px; margin-bottom: 1rem; background-color: #f8f9fa;">
+            <div class="card-body d-flex flex-column">
+                <!-- Chat Messages: grows to match the Areas of Concern card's height, never below 300px -->
+                <div @ref="chatContainer" style="flex: 1 1 0; min-height: 300px; overflow-y: auto; border: 1px solid #dee2e6; padding: 1rem; border-radius: 5px; margin-bottom: 1rem; background-color: #f8f9fa;">
                     @if (messages.Count == 0)
                     {
                         <div class="mb-3">
