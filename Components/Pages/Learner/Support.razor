@@ -11,6 +11,8 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
 @inject ARIS1.Services.IChatAssistantService ChatAssistant
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 <button class="btn btn-secondary mb-3" @onclick='() => Navigation.NavigateTo("/learner/dashboard")'>
     Back to Dashboard
@@ -77,7 +79,7 @@
             </div>
             <div class="card-body">
                 <!-- Chat Messages -->
-                <div style="height: 300px; overflow-y: auto; border: 1px solid #dee2e6; padding: 1rem; border-radius: 5px; margin-bottom: 1rem; background-color: #f8f9fa;">
+                <div @ref="chatContainer" style="height: 300px; overflow-y: auto; border: 1px solid #dee2e6; padding: 1rem; border-radius: 5px; margin-bottom: 1rem; background-color: #f8f9fa;">
                     @if (messages.Count == 0)
                     {
                         <div class="mb-3">
@@ -162,6 +164,44 @@
     private string userInput = string.Empty;
     private decimal averagePercentage = 0m;
     private decimal attendancePercentage = 0m;
+
+    // Auto-scroll: after any render where a message was added or the typing indicator toggled,
+    // jump the chat container to its newest content.
+    private ElementReference chatContainer;
+    private IJSObjectReference? jsModule;
+    private int lastScrolledMessageCount;
+    private bool lastScrolledTyping;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (messages.Count == lastScrolledMessageCount && isTyping == lastScrolledTyping) return;
+        lastScrolledMessageCount = messages.Count;
+        lastScrolledTyping = isTyping;
+
+        try
+        {
+            jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Learner/Support.razor.js");
+            await jsModule.InvokeVoidAsync("scrollToBottom", chatContainer);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit gone — nothing to scroll.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (jsModule != null)
+        {
+            try
+            {
+                await jsModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
 
     private class ChatMessage
     {
