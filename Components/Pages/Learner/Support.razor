@@ -11,6 +11,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
 @inject ARIS1.Services.IChatAssistantService ChatAssistant
+@inject ARIS1.Services.WeightCalculationService WeightCalculationService
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -36,10 +37,7 @@
                 {
                     @foreach (var concern in areasOfConcern)
                     {
-                        var alertClass = concern.Level == "Critical" ? "alert-danger" :
-                                        concern.Level == "High" ? "alert-warning" : "alert-info";
-                        
-                        <div class="alert @alertClass" style="cursor: pointer;" @onclick='() => SelectConcern(concern)'>
+                        <div class="alert @GetConcernAlertClass(concern.Level)" style="cursor: pointer;" @onclick='() => SelectConcern(concern)'>
                             <h6>@concern.Subject</h6>
                             <p class="mb-1">@concern.Description</p>
                             <small><strong>Level:</strong> @concern.Level</small>
@@ -241,18 +239,19 @@
                     .Select(s => (int?)s.AcademicYear)
                     .MaxAsync() ?? DateTime.Now.Year;
 
-                enrolledSubjects = await DbContext.LearnerSubjects
+                var currentSubjects = await DbContext.LearnerSubjects
                     .AsNoTracking()
                     .Where(ls => ls.LearnerId == currentLearner.LearnerId && ls.Subject.AcademicYear == currentYear)
-                    .Select(ls => ls.Subject.Name)
-                    .Distinct()
-                    .OrderBy(n => n)
+                    .Select(ls => new { ls.Subject.SubjectId, ls.Subject.Name, ls.Subject.Grade })
                     .ToListAsync();
 
-                // Load interventions
+                enrolledSubjects = currentSubjects.Select(s => s.Name).Distinct().OrderBy(n => n).ToList();
+                var enrolledSubjectIds = currentSubjects.Select(s => s.SubjectId).ToList();
+
+                // Load interventions (current year only, so past years' concerns don't resurface)
                 var interventions = await DbContext.Interventions
                     .AsNoTracking()
-                    .Where(i => i.LearnerId == currentLearner.LearnerId)
+                    .Where(i => i.LearnerId == currentLearner.LearnerId && i.Question.Assessment.Subject.AcademicYear == currentYear)
                     .Include(i => i.Question)
                     .ThenInclude(q => q.Assessment)
                     .ThenInclude(a => a.Subject)
@@ -284,27 +283,46 @@
                     });
                 }
 
-                // Calculate average
-                var marks = await DbContext.LearnerMarks
-                    .AsNoTracking()
-                    .Where(m => m.LearnerId == currentLearner.LearnerId && !m.IsAbsent)
-                    .Include(m => m.Assessment)
-                    .ToListAsync();
-
-                if (marks.Count > 0)
+                // Overall average: mean of each current-year subject's weighted mark, using the same numbers
+                // shown on Learner/Marks.razor — the Year Mark where a Year structure is configured, otherwise
+                // the latest term's weighted mark. Subjects with no computable mark are skipped.
+                var subjectMarks = new List<decimal>();
+                foreach (var subject in currentSubjects)
                 {
-                    averagePercentage = marks.Average(m => (m.MarksAwarded / m.Assessment.MaxMark) * 100);
+                    var yearResult = await WeightCalculationService.CalculateYearMark(currentLearner.LearnerId, subject.SubjectId);
+                    if (yearResult.IsSuccessful)
+                    {
+                        subjectMarks.Add(yearResult.YearPercentage);
+                        continue;
+                    }
+
+                    var terms = subject.Grade == 12 ? new[] { 3, 2, 1 } : new[] { 4, 3, 2, 1 };
+                    foreach (var term in terms)
+                    {
+                        var termResult = await WeightCalculationService.CalculateWeightedTermMark(currentLearner.LearnerId, subject.SubjectId, term);
+                        if (termResult.IsSuccessful)
+                        {
+                            subjectMarks.Add(termResult.WeightedPercentage);
+                            break;
+                        }
+                    }
                 }
 
-                // Calculate attendance
+                if (subjectMarks.Count > 0)
+                {
+                    averagePercentage = subjectMarks.Average();
+                }
+
+                // Attendance across the current year's enrolled subjects only
                 var attendance = await DbContext.AttendanceRecords
                     .AsNoTracking()
-                    .Where(a => a.LearnerId == currentLearner.LearnerId)
+                    .Where(a => a.LearnerId == currentLearner.LearnerId && enrolledSubjectIds.Contains(a.Session.SubjectId))
+                    .Select(a => a.Status)
                     .ToListAsync();
 
                 if (attendance.Count > 0)
                 {
-                    int present = attendance.Count(a => a.Status == "Present");
+                    int present = attendance.Count(s => s == "Present");
                     attendancePercentage = (present * 100m) / attendance.Count;
                 }
             }
@@ -314,6 +332,14 @@
             Console.WriteLine($"Error: {ex.Message}");
         }
     }
+
+    private static string GetConcernAlertClass(string level) => level switch
+    {
+        "Critical" => "alert-danger",
+        "Attention" => "alert-warning",
+        "Focus" => "alert-info",
+        _ => "alert-success"
+    };
 
     private int GetLevelScore(string level)
     {

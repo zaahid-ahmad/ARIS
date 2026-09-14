@@ -250,14 +250,19 @@ else
                     .Select(ls => ls.Subject)
                     .ToListAsync();
 
-                interventions = await DbContext.Interventions
+                // Severity order (not alphabetical, which put Attention before Critical) is applied in
+                // memory since Array.IndexOf can't be translated to SQL. Unknown levels sort last.
+                var loaded = await DbContext.Interventions
                     .AsNoTracking()
                     .Where(i => i.LearnerId == currentLearner.LearnerId)
                     .Include(i => i.Question)
                     .ThenInclude(q => q.Assessment)
-                    .OrderBy(i => i.Question.Assessment.Term)
-                    .ThenBy(i => i.Level)
                     .ToListAsync();
+
+                interventions = loaded
+                    .OrderBy(i => i.Question.Assessment.Term)
+                    .ThenBy(i => SeverityRank(i.Level))
+                    .ToList();
             }
         }
     }
@@ -265,6 +270,14 @@ else
     private void OpenInterventionModal(Subject subject)
     {
         selectedSubject = subject;
+    }
+
+    private static readonly string[] SeverityOrder = { "Critical", "Attention", "Focus", "Minor", "WellDone" };
+
+    private static int SeverityRank(string level)
+    {
+        var index = Array.IndexOf(SeverityOrder, level);
+        return index < 0 ? SeverityOrder.Length : index;
     }
 
     private static (string BadgeColor, string TextColor) GetLevelColors(string level) => level switch
