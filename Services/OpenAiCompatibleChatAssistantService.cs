@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace ARIS1.Services
 {
@@ -15,6 +16,8 @@ namespace ARIS1.Services
         private readonly string _apiKey;
         private readonly string _baseUrl;
         private readonly string _model;
+        private readonly double _temperature;
+        private readonly string? _reasoningEffort;
 
         public OpenAiCompatibleChatAssistantService(
             HttpClient httpClient,
@@ -29,78 +32,108 @@ namespace ARIS1.Services
                 ?? throw new InvalidOperationException("ChatAssistant:ApiKey is not configured.");
             _baseUrl = (configuration["ChatAssistant:BaseUrl"] ?? "https://api.groq.com/openai/v1").TrimEnd('/');
             _model = configuration["ChatAssistant:Model"] ?? "openai/gpt-oss-120b";
+            // Low temperature by default keeps replies close to the CAPS rules in the system prompt.
+            _temperature = double.TryParse(configuration["ChatAssistant:Temperature"],
+                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t)
+                ? t
+                : 0.2;
+            // gpt-oss models are reasoning models: "low" keeps hidden reasoning tokens (which count toward
+            // max_tokens and the free tier's tokens-per-minute limit) small. Other providers/models may not
+            // accept the parameter, so it's only sent when configured or when using gpt-oss.
+            _reasoningEffort = configuration["ChatAssistant:ReasoningEffort"]
+                ?? (_model.Contains("gpt-oss", StringComparison.OrdinalIgnoreCase) ? "low" : null);
         }
 
-        public async Task<string> GetResponseAsync(string userInput, IReadOnlyList<ChatConcern> concerns)
+        private const int MaxRateLimitWaitSeconds = 5;
+
+        public async Task<string> GetResponseAsync(string userInput, ChatContext context)
         {
             var request = new ChatRequest
             {
                 Model = _model,
-                MaxTokens = 300,
-                Temperature = 0.5,
+                MaxTokens = 600,
+                Temperature = _temperature,
+                ReasoningEffort = _reasoningEffort,
                 Messages = new List<ChatMessage>
                 {
-                    new() { Role = "system", Content = BuildSystemInstruction(concerns) },
+                    new() { Role = "system", Content = CapsSystemPrompt.Build(context) },
                     new() { Role = "user", Content = userInput }
                 }
             };
 
             try
             {
-                using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
-                {
-                    Content = JsonContent.Create(request)
-                };
-                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+                var response = await SendAsync(request);
 
-                using var response = await _httpClient.SendAsync(httpRequest);
+                // Free-tier tokens-per-minute limit: if it resets within a few seconds, wait and retry once
+                // rather than dropping straight to the rule-based bot.
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    var wait = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(MaxRateLimitWaitSeconds + 1);
+                    if (wait <= TimeSpan.FromSeconds(MaxRateLimitWaitSeconds))
+                    {
+                        _logger.LogInformation("Chat assistant rate-limited; retrying in {Seconds:0.#}s.", wait.TotalSeconds);
+                        response.Dispose();
+                        await Task.Delay(wait);
+                        response = await SendAsync(request);
+                    }
+                }
+
+                using var _ = response;
                 if (!response.IsSuccessStatusCode)
                 {
                     var body = await response.Content.ReadAsStringAsync();
                     _logger.LogWarning("Chat assistant request failed with {StatusCode}: {Body}",
                         (int)response.StatusCode, body.Length > 500 ? body[..500] : body);
-                    return await _fallback.GetResponseAsync(userInput, concerns);
+                    return await _fallback.GetResponseAsync(userInput, context);
                 }
 
                 var result = await response.Content.ReadFromJsonAsync<ChatResponse>();
-                var text = result?.Choices?.FirstOrDefault()?.Message?.Content;
+                var choice = result?.Choices?.FirstOrDefault();
+                var text = choice?.Message?.Content;
+                if (choice?.FinishReason == "length")
+                {
+                    _logger.LogWarning("Chat assistant reply was cut off by the max_tokens limit.");
+                }
                 if (string.IsNullOrWhiteSpace(text))
                 {
                     _logger.LogWarning("Chat assistant returned an empty response.");
-                    return await _fallback.GetResponseAsync(userInput, concerns);
+                    return await _fallback.GetResponseAsync(userInput, context);
                 }
 
-                return text.Trim();
+                return StripMarkdown(text);
             }
             catch (HttpRequestException ex)
             {
                 _logger.LogWarning(ex, "Chat assistant request could not reach {BaseUrl}.", _baseUrl);
-                return await _fallback.GetResponseAsync(userInput, concerns);
+                return await _fallback.GetResponseAsync(userInput, context);
             }
             catch (TaskCanceledException ex)
             {
                 _logger.LogWarning(ex, "Chat assistant request timed out.");
-                return await _fallback.GetResponseAsync(userInput, concerns);
+                return await _fallback.GetResponseAsync(userInput, context);
             }
         }
 
-        private static string BuildSystemInstruction(IReadOnlyList<ChatConcern> concerns)
+        private async Task<HttpResponseMessage> SendAsync(ChatRequest request)
         {
-            if (concerns.Count == 0)
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
             {
-                return "You are a friendly study assistant for a high school learner who currently has no flagged " +
-                       "areas of concern. Congratulate them briefly and encourage them to keep up the good work. " +
-                       "Keep responses to 2-3 sentences.";
-            }
+                Content = JsonContent.Create(request)
+            };
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+            return await _httpClient.SendAsync(httpRequest);
+        }
 
-            var concernLines = concerns.Select(c =>
-                $"- {c.Subject} (level: {c.Level}, topics: {string.Join(", ", c.Topics)})");
-
-            return "You are a friendly study assistant for a high school learner. " +
-                   "Only help with the learner's own flagged areas of concern, listed below. " +
-                   "If asked about anything unrelated to these subjects/topics, politely decline and redirect " +
-                   "the learner back to one of them. Keep responses encouraging, practical, and to 2-4 sentences.\n\n" +
-                   "Areas of concern:\n" + string.Join("\n", concernLines);
+        // The chat bubble renders raw text, so remove markdown/LaTeX markers the model sometimes emits
+        // despite the plain-text instruction.
+        private static string StripMarkdown(string text)
+        {
+            text = Regex.Replace(text, @"\*\*(.+?)\*\*", "$1");
+            text = Regex.Replace(text, @"__(.+?)__", "$1");
+            text = Regex.Replace(text, @"^\s{0,3}#{1,6}\s+", "", RegexOptions.Multiline);
+            text = text.Replace(@"\(", "").Replace(@"\)", "").Replace(@"\[", "").Replace(@"\]", "");
+            return text.Trim();
         }
 
         private class ChatRequest
@@ -116,6 +149,10 @@ namespace ARIS1.Services
 
             [JsonPropertyName("temperature")]
             public double Temperature { get; set; }
+
+            [JsonPropertyName("reasoning_effort")]
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public string? ReasoningEffort { get; set; }
         }
 
         private class ChatMessage
@@ -137,6 +174,9 @@ namespace ARIS1.Services
         {
             [JsonPropertyName("message")]
             public ChatMessage? Message { get; set; }
+
+            [JsonPropertyName("finish_reason")]
+            public string? FinishReason { get; set; }
         }
     }
 }

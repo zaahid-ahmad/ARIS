@@ -13,8 +13,9 @@ namespace ARIS1.Services
             ["WellDone"] = "You're doing well in {0} — keep practicing to maintain it, and consider helping revise with a study partner."
         };
 
-        public Task<string> GetResponseAsync(string userInput, IReadOnlyList<ChatConcern> concerns)
+        public Task<string> GetResponseAsync(string userInput, ChatContext context)
         {
+            var concerns = context.Concerns;
             var input = userInput.Trim().ToLowerInvariant();
 
             if (concerns.Count == 0)

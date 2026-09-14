@@ -158,6 +158,7 @@
 @code {
     private Learner? currentLearner;
     private List<ConcernItem> areasOfConcern = new();
+    private List<string> enrolledSubjects = new();
     private ConcernItem? selectedConcern;
     private List<ChatMessage> messages = new();
     private bool isTyping = false;
@@ -232,6 +233,22 @@
 
             if (currentLearner != null)
             {
+                // Current-year enrolled subjects define the chatbot's CAPS scope. Year resolved the same
+                // way as the Teacher pages (latest AcademicYear for the school, else the calendar year).
+                var schoolId = currentLearner.User.SchoolId;
+                var currentYear = await DbContext.Subjects
+                    .Where(s => s.SchoolId == schoolId)
+                    .Select(s => (int?)s.AcademicYear)
+                    .MaxAsync() ?? DateTime.Now.Year;
+
+                enrolledSubjects = await DbContext.LearnerSubjects
+                    .AsNoTracking()
+                    .Where(ls => ls.LearnerId == currentLearner.LearnerId && ls.Subject.AcademicYear == currentYear)
+                    .Select(ls => ls.Subject.Name)
+                    .Distinct()
+                    .OrderBy(n => n)
+                    .ToListAsync();
+
                 // Load interventions
                 var interventions = await DbContext.Interventions
                     .AsNoTracking()
@@ -330,7 +347,8 @@
             var concerns = areasOfConcern
                 .Select(c => new ARIS1.Services.ChatConcern(c.Subject, c.Level, c.Topics))
                 .ToList();
-            var response = await ChatAssistant.GetResponseAsync(text, concerns);
+            var context = new ARIS1.Services.ChatContext(currentLearner?.Grade ?? 0, enrolledSubjects, concerns);
+            var response = await ChatAssistant.GetResponseAsync(text, context);
             AddMessage("bot", response);
         }
         catch (Exception ex)
