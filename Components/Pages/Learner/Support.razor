@@ -126,7 +126,7 @@
                             @foreach (var solution in selectedConcern.Solutions)
                             {
                                 <li>
-                                    <button class="btn btn-link btn-sm text-left p-0" @onclick='() => SendMessage(solution)'>
+                                    <button class="btn btn-link btn-sm text-left p-0" @onclick='() => SendMessage(solution)' disabled="@isTyping">
                                         @solution
                                     </button>
                                 </li>
@@ -141,6 +141,7 @@
                            class="form-control"
                            placeholder="Ask a question..."
                            @bind="userInput"
+                           @bind:event="oninput"
                            @onkeydown='async (KeyboardEventArgs e) => { if (e.Key == "Enter") await SendMessage(userInput); }'
                            disabled="@isTyping" />
                     <button class="btn btn-success" type="button" @onclick='() => SendMessage(userInput)' disabled="@isTyping">
@@ -277,20 +278,30 @@
 
     private async Task SendMessage(string text)
     {
-        if (string.IsNullOrWhiteSpace(text)) return;
+        if (isTyping || string.IsNullOrWhiteSpace(text)) return;
 
         AddMessage("user", text);
         userInput = string.Empty;
         isTyping = true;
         StateHasChanged();
 
-        var concerns = areasOfConcern
-            .Select(c => new ARIS1.Services.ChatConcern(c.Subject, c.Level, c.Topics))
-            .ToList();
-        var response = await ChatAssistant.GetResponseAsync(text, concerns);
-
-        AddMessage("bot", response);
-        isTyping = false;
+        try
+        {
+            var concerns = areasOfConcern
+                .Select(c => new ARIS1.Services.ChatConcern(c.Subject, c.Level, c.Topics))
+                .ToList();
+            var response = await ChatAssistant.GetResponseAsync(text, concerns);
+            AddMessage("bot", response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+            AddMessage("bot", "Sorry, something went wrong — please try again.");
+        }
+        finally
+        {
+            isTyping = false;
+        }
     }
 
     private void AddMessage(string sender, string text)

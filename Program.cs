@@ -23,13 +23,16 @@ builder.Services.AddScoped<BulkUserImportService>();
 builder.Services.AddScoped<BulkSubjectAllocationService>();
 builder.Services.AddScoped<YearRolloverService>();
 
-// Support.razor depends only on IChatAssistantService — falls back to the free
-// rule-based bot when no Gemini API key is configured (set via user-secrets:
-// dotnet user-secrets set "Gemini:ApiKey" "<your-key>").
-if (!string.IsNullOrWhiteSpace(builder.Configuration["Gemini:ApiKey"]))
+// Support.razor depends only on IChatAssistantService — uses an OpenAI-compatible LLM
+// (Groq by default) when an API key is configured, otherwise the free rule-based bot.
+// The rule-based bot is always registered since the LLM service falls back to it on failure.
+// dotnet user-secrets set "ChatAssistant:ApiKey" "<groq-key>"
+// Optional: ChatAssistant:BaseUrl (default https://api.groq.com/openai/v1), ChatAssistant:Model.
+builder.Services.AddScoped<RuleBasedChatAssistantService>();
+if (!string.IsNullOrWhiteSpace(builder.Configuration["ChatAssistant:ApiKey"]))
 {
-    builder.Services.AddHttpClient<GeminiChatAssistantService>();
-    builder.Services.AddScoped<IChatAssistantService>(sp => sp.GetRequiredService<GeminiChatAssistantService>());
+    builder.Services.AddHttpClient<OpenAiCompatibleChatAssistantService>(c => c.Timeout = TimeSpan.FromSeconds(20));
+    builder.Services.AddScoped<IChatAssistantService>(sp => sp.GetRequiredService<OpenAiCompatibleChatAssistantService>());
 }
 else
 {
