@@ -24,23 +24,19 @@ namespace ARIS1.Services.Email
         private readonly AppDbContext _dbContext;
         private readonly EmailQueue _queue;
         private readonly EmailOptions _options;
-        private readonly IHostEnvironment _environment;
 
-        public EmailService(AppDbContext dbContext, EmailQueue queue, IOptions<EmailOptions> options, IHostEnvironment environment)
+        public EmailService(AppDbContext dbContext, EmailQueue queue, IOptions<EmailOptions> options)
         {
             _dbContext = dbContext;
             _queue = queue;
             _options = options.Value;
-            _environment = environment;
         }
 
         // Null when delivery is possible; otherwise why every email will be skipped.
         public string? DeliveryBlockedReason =>
             !_options.IsConfigured
                 ? "Email delivery is not configured (Email:Host / Email:FromAddress)."
-                : _environment.IsDevelopment() && string.IsNullOrWhiteSpace(_options.RedirectAllTo)
-                    ? "Email:RedirectAllTo must be set to send email in Development."
-                    : null;
+                : _options.RealSendBlockedReason;
 
         public bool IsRedirecting => !string.IsNullOrWhiteSpace(_options.RedirectAllTo);
 

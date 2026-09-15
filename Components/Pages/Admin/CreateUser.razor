@@ -325,7 +325,9 @@
             Email = email,
             Fullname = fullName,
             IsActive = true,
-            EmailConfirmed = true,
+            // Starts unverified; confirmed when the user completes an emailed set-password/verification link,
+            // or an admin marks it verified. Sign-in isn't blocked either way.
+            EmailConfirmed = false,
             SchoolId = currentAdmin.SchoolId
         };
 

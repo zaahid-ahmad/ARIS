@@ -118,7 +118,7 @@ Standard scaffolded Identity pages exist under `Components/Account/Pages/`:
 | SQL injection protected (EF parameterization) | ✅ |
 | School-based data isolation | ✅ (mostly) — audited and hardened *2026-09-09*, see issue #41 |
 | Password strength | ✅ Fixed — uppercase/lowercase/digit/non-alphanumeric all required (see issue #10) |
-| Email verification | ❌ Disabled |
+| Email verification | ⚠ Tracked, not enforced *2026-09-15* — accounts created from now on start unverified and are confirmed via an emailed set-password/verification link or an admin "Mark verified"; sign-in isn't blocked; existing/seeded accounts unchanged (see §5.10) |
 | Rate limiting on login | ❌ Missing |
 | Resource-level authorization policies | ✅ Partially Fixed *2026-09-09* — no formal ASP.NET Core policy framework, but every actually-reachable resource-ownership gap found by audit is closed (see issue #41); a lower-risk closure-bound set is intentionally left open |
 | Audit trail | ❌ Missing |
@@ -375,6 +375,24 @@ Verified live end-to-end against Riverside's seeded data: Riaan Van Wyk (Mathema
 ### 5.10 Email (`Services/Email/`) — ✅ *2026-09-14*
 
 **Architecture.** `EmailService` (scoped) writes one `EmailLog` row per message and enqueues its id on `EmailQueue` (singleton `Channel<int>`); `EmailBackgroundService` (hosted) sends via MailKit SMTP one at a time, throttled by `Email:SendsPerMinute`, recording `Sent`/`Failed`/`Error`/`SentUtc`, and re-queues leftover `Queued` rows on startup. Pages never block on SMTP. Config section `Email` (`EmailOptions`): `Host`, `Port`, `UseStartTls`, `Username`, `Password`, `FromAddress`, `FromName`, `RedirectAllTo`, `SendsPerMinute`. Rows are written `Skipped` (reason in `Error`) when delivery isn't configured, when running in **Development without `RedirectAllTo`** (hard guard: Riverside's seeded parents have realistic public-provider addresses such as `@gmail.com`/`@outlook.com` that real people may own), when the recipient has no address, or when a parent opted out (non-`Account` categories only). `RedirectAllTo` sends everything to one inbox with `[To: original]` prefixed to the subject.
+
+**✅ *2026-09-15* — Real-recipient guard hardened.** The original guard only applied at queue time and only in Development, which left two gaps: (1) `EmailBackgroundService` never re-checked it, so rows queued while `RedirectAllTo` was set and re-queued after a restart without it would have been sent to their real addresses; (2) a non-Development run with SMTP settings and no redirect had no guard at all. Now `EmailOptions.AllowRealRecipients` (default `false`) must be explicitly `true` to send with `RedirectAllTo` empty, enforced in every environment both in `EmailService.DeliveryBlockedReason` (queue time) and in `EmailBackgroundService.SendOneAsync` (final gate, marks the row `Skipped`). Verified live against a local SMTP catcher in a Staging run (so no user-secrets loaded): a pre-inserted `Queued` row was `Skipped` at send time with nothing captured; a Forgot Password with no redirect was `Skipped` at queue time; with `AllowRealRecipients=true` the same request was delivered to its real `ToAddress` (captured locally).
+
+**✅ *2026-09-15* — Email verification (tracked, not enforced).** Previously every creation path set `EmailConfirmed = true` on creation, so a mistyped address went unnoticed and resets/alerts/reports silently went to the wrong place.
+- *New accounts start unverified:* `Admin/CreateUser.razor`, `SuperAdmin/Admins.razor` and `BulkUserImportService` now create users with `EmailConfirmed = false`. The seeders are unchanged. No data was migrated, so all existing accounts, including the 495 demo users, stay confirmed.
+- *Ways an address becomes verified:*
+  - completing an emailed set-password/reset link (`ResetPassword.razor` marks it confirmed; the token can only have arrived by email);
+  - the new `AccountEmailService.SendVerificationAsync` link to `Account/ConfirmEmail` (restyled to the login-card design, shows an error for invalid/expired links);
+  - an admin "Mark verified".
+- *Forgot Password* no longer skips unverified users.
+- *Admin visibility:* `Admin/UserManagement.razor` shows a "Not verified" badge, an "Only unverified emails" filter, and "Send verification email" / "Mark verified" buttons (school-scoped re-fetch plus a re-entrancy guard). `SuperAdmin/Admins.razor` has the same badge and buttons.
+- *Not enforced:* `RequireConfirmedAccount`/`RequireConfirmedEmail` stay `false`, so unverified users can still sign in.
+- *Verified live* with the local SMTP catcher and two throwaway teachers created via Bulk Import:
+  - both were created unverified with welcome emails Sent, and the filter listed only them;
+  - "Mark verified" confirmed one;
+  - "Send verification email" queued a link: a tampered code showed the error page and left the account unverified, and the real link confirmed it;
+  - the throwaway users and their emails were deleted afterwards, leaving the confirmed-user count at 495, identical to before.
+  - Completing a welcome link (which requires typing a password) was not exercised live.
 
 **New entities (migration `AddEmail`).** `EmailLog` (school-scoped audit row incl. HTML/text body, category, status, sender, learner), `ParentAlertState` (`(LearnerId, SubjectId)` key, last alerted level), `School.ParentAlertsEnabled` (default off), `Parent.ReceiveNotificationEmails` (default on).
 

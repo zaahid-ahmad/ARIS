@@ -71,7 +71,7 @@ namespace ARIS1.Services.Email
                 $"<tr><td style=\"color:#5a6e82\">Sign-in email</td><td><strong>{Encode(email)}</strong></td></tr>" +
                 (schoolCode != null ? $"<tr><td style=\"color:#5a6e82\">School code</td><td><strong>{Encode(schoolCode)}</strong></td></tr>" : "") +
                 "</table>" +
-                "<p style=\"margin:0 0 14px\">Click below to choose your password.</p>" +
+                "<p style=\"margin:0 0 14px\">Click below to choose your password. Using this link also confirms your email address.</p>" +
                 Button(setPasswordUrl, "Set my password") +
                 "<p style=\"margin:0 0 14px;color:#5a6e82;font-size:13px\">This link expires. If it has, use \"Forgot password?\" on the sign-in page.</p>",
                 notificationFooter: false);
@@ -85,7 +85,7 @@ namespace ARIS1.Services.Email
         {
             var html = Layout("Confirm your email", schoolName,
                 $"<p style=\"margin:0 0 14px\">Hi {Encode(fullname)},</p>" +
-                "<p style=\"margin:0 0 14px\">Please confirm your email address for ARIS.</p>" +
+                "<p style=\"margin:0 0 14px\">Please confirm this is the right email address for your ARIS account, so password resets and school notifications reach you.</p>" +
                 Button(confirmUrl, "Confirm email"),
                 notificationFooter: false);
             return new RenderedEmail("Confirm your ARIS email", html, $"Hi {fullname},\n\nConfirm your email:\n{confirmUrl}");

@@ -175,7 +175,7 @@ namespace ARIS1.Services
                     Email = email,
                     Fullname = fullName,
                     IsActive = true,
-                    EmailConfirmed = true,
+                    EmailConfirmed = false, // verified later via emailed link or "Mark verified"; sign-in not blocked
                     SchoolId = schoolId
                 };
 

@@ -81,6 +81,19 @@ namespace ARIS1.Services.Email
             var log = await db.EmailLogs.FirstOrDefaultAsync(e => e.EmailLogId == emailLogId, stoppingToken);
             if (log == null || log.Status != EmailStatuses.Queued) return;
 
+            // Final gate, re-checked at send time with the current configuration: rows queued earlier (and
+            // re-queued after a restart) must not reach real recipients if redirect has since been removed.
+            var blocked = !_options.IsConfigured
+                ? "Email delivery is not configured (Email:Host / Email:FromAddress)."
+                : _options.RealSendBlockedReason;
+            if (blocked != null)
+            {
+                log.Status = EmailStatuses.Skipped;
+                log.Error = blocked;
+                await db.SaveChangesAsync(CancellationToken.None);
+                return;
+            }
+
             var redirect = string.IsNullOrWhiteSpace(_options.RedirectAllTo) ? null : _options.RedirectAllTo.Trim();
             var deliverTo = redirect ?? log.ToAddress;
 

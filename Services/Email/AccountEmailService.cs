@@ -39,6 +39,17 @@ namespace ARIS1.Services.Email
             return await QueueAsync(user, rendered, sentByUserId);
         }
 
+        // Verification link for users who already have a password. Account/ConfirmEmail marks the address confirmed.
+        public async Task<EmailLog> SendVerificationAsync(User user, string baseUri, string? sentByUserId)
+        {
+            var code = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+            code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+            var link = QueryHelpers.AddQueryString(new Uri(new Uri(baseUri), "Account/ConfirmEmail").AbsoluteUri,
+                new Dictionary<string, string?> { ["userId"] = user.Id, ["code"] = code });
+            var rendered = EmailTemplates.ConfirmEmail(user.Fullname, link, await SchoolNameAsync(user));
+            return await QueueAsync(user, rendered, sentByUserId);
+        }
+
         private async Task<string> BuildResetLinkAsync(User user, string baseUri)
         {
             var code = await _userManager.GeneratePasswordResetTokenAsync(user);

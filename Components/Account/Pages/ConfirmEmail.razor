@@ -1,4 +1,4 @@
-﻿@page "/Account/ConfirmEmail"
+@page "/Account/ConfirmEmail"
 
 @using System.Text
 @using Microsoft.AspNetCore.Identity
@@ -9,13 +9,37 @@
 @inject UserManager<User> UserManager
 @inject IdentityRedirectManager RedirectManager
 
-<PageTitle>Confirm email</PageTitle>
+<PageTitle>Confirm email | ARIS</PageTitle>
 
-<h1>Confirm email</h1>
-<StatusMessage Message="@statusMessage" />
+<div class="aris-login login-wrap">
+    <div class="login-card">
+        <div class="login-brand">
+            <div class="login-logo"><i class="fas fa-graduation-cap"></i></div>
+            <div class="login-brand-text">
+                <h2>ARIS</h2>
+                <p>Academic Risk Intelligence System</p>
+            </div>
+        </div>
+
+        @if (succeeded)
+        {
+            <div class="login-heading">Email confirmed</div>
+            <div class="login-info" role="alert">Thank you for confirming your email. Password resets and school notifications will reach this address.</div>
+        }
+        else
+        {
+            <div class="login-heading">We couldn't confirm your email</div>
+            <div class="login-error show" role="alert">This link is invalid or has expired. Ask your school administrator to send a new verification email.</div>
+        }
+
+        <a class="login-btn" href="Account/Login" style="display:block;text-align:center;text-decoration:none;margin-top:1rem">
+            <i class="fas fa-sign-in-alt"></i>&nbsp; Go to sign in
+        </a>
+    </div>
+</div>
 
 @code {
-    private string? statusMessage;
+    private bool succeeded;
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
@@ -38,13 +62,18 @@
         if (user is null)
         {
             HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            statusMessage = $"Error loading user with ID {UserId}";
+            return;
         }
-        else
+
+        try
         {
             var code = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(Code));
             var result = await UserManager.ConfirmEmailAsync(user, code);
-            statusMessage = result.Succeeded ? "Thank you for confirming your email." : "Error confirming your email.";
+            succeeded = result.Succeeded;
+        }
+        catch (FormatException)
+        {
+            succeeded = false;
         }
     }
 }

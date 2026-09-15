@@ -14,9 +14,18 @@ namespace ARIS1.Services.Email
         public string FromName { get; set; } = "ARIS";
 
         // When set, every email is delivered to this address instead of the real recipient (the original
-        // recipient is shown in the subject). Required for real sending in Development, since seeded
-        // accounts use fake addresses.
+        // recipient is shown in the subject). Seeded demo parents have realistic public addresses that real
+        // people may own, so this should stay set whenever demo data is in use.
         public string? RedirectAllTo { get; set; }
+
+        // Must be explicitly true to email real recipients (i.e. to send with RedirectAllTo empty). Enforced in
+        // every environment, both when emails are queued and again at the final send step.
+        public bool AllowRealRecipients { get; set; } = false;
+
+        public string? RealSendBlockedReason =>
+            string.IsNullOrWhiteSpace(RedirectAllTo) && !AllowRealRecipients
+                ? "Email:RedirectAllTo is empty and Email:AllowRealRecipients is not true, so real recipients can't be emailed."
+                : null;
 
         // Throttle to stay within free-tier provider limits (e.g. Brevo 300/day, Gmail ~500/day).
         public int SendsPerMinute { get; set; } = 20;

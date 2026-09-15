@@ -50,7 +50,13 @@ else
                 var schoolName = admin.School?.Name ?? "Not Assigned";
                 <tr>
                     <td>@admin.Fullname</td>
-                    <td>@admin.Email</td>
+                    <td>
+                        @admin.Email
+                        @if (!admin.EmailConfirmed)
+                        {
+                            <span class="badge bg-warning text-dark ms-1" title="This admin hasn't confirmed their email address yet">Not verified</span>
+                        }
+                    </td>
                     <td>@schoolName</td>
                     <td>
                         <span class="badge @(admin.IsActive ? "bg-success" : "bg-secondary")">
@@ -58,6 +64,11 @@ else
                         </span>
                     </td>
                     <td>
+                        @if (admin.IsActive && !admin.EmailConfirmed)
+                        {
+                            <button class="btn btn-outline-primary btn-sm me-1" disabled="@isVerifying" @onclick="() => SendVerificationEmail(admin.Id)">Send verification email</button>
+                            <button class="btn btn-outline-success btn-sm me-1" disabled="@isVerifying" @onclick="() => MarkVerified(admin.Id)">Mark verified</button>
+                        }
                         <button class="btn btn-warning btn-sm me-1" @onclick="() => ShowResetPasswordModal(admin)">Reset Password</button>
                         @if (admin.IsActive)
                         {
@@ -307,7 +318,7 @@ else
                 Fullname = newAdminFullname,
                 SchoolId = newAdminSchoolId,
                 IsActive = true,
-                EmailConfirmed = true
+                EmailConfirmed = false // verified later via emailed link or "Mark verified"; sign-in not blocked
             };
 
             var result = await UserManager.CreateAsync(newAdmin, tempPass);
@@ -341,6 +352,64 @@ else
         catch (Exception ex)
         {
             errorMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private bool isVerifying;
+
+    private async Task SendVerificationEmail(string userId)
+    {
+        if (isVerifying) return;
+        isVerifying = true;
+        errorMessage = successMessage = string.Empty;
+        try
+        {
+            var admin = await UserManager.FindByIdAsync(userId);
+            if (admin == null || !await UserManager.IsInRoleAsync(admin, "Admin"))
+            { errorMessage = "Admin no longer exists."; return; }
+            if (admin.EmailConfirmed)
+            { successMessage = $"{admin.Email} is already verified."; return; }
+
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var sender = await UserManager.GetUserAsync(authState.User);
+            var log = await AccountEmailService.SendVerificationAsync(admin, Navigation.BaseUri, sender?.Id);
+            if (log.Status == EmailStatuses.Skipped) errorMessage = $"Verification email not sent: {log.Error}";
+            else successMessage = $"Verification email queued for {admin.Email}.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isVerifying = false;
+        }
+    }
+
+    private async Task MarkVerified(string userId)
+    {
+        if (isVerifying) return;
+        isVerifying = true;
+        errorMessage = successMessage = string.Empty;
+        try
+        {
+            var admin = await UserManager.FindByIdAsync(userId);
+            if (admin == null || !await UserManager.IsInRoleAsync(admin, "Admin"))
+            { errorMessage = "Admin no longer exists."; return; }
+
+            admin.EmailConfirmed = true;
+            var result = await UserManager.UpdateAsync(admin);
+            if (result.Succeeded) successMessage = $"{admin.Email} marked as verified.";
+            else errorMessage = string.Join(", ", result.Errors.Select(e => e.Description));
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isVerifying = false;
         }
     }
 
