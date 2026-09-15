@@ -41,13 +41,46 @@ else
     </div>
 }
 
+@if (parentId != null)
+{
+    <div class="card mt-3" style="max-width:640px">
+        <div class="card-body">
+            <h5 class="card-title"><i class="fas fa-envelope"></i> Email notifications</h5>
+            <p class="card-text text-muted small mb-2">
+                Risk alerts, messages from the school, and progress reports. Account emails (such as password resets) are always sent.
+            </p>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="notifyEmails" checked="@receiveEmails"
+                       @onchange="ToggleEmailsAsync" disabled="@isSavingPreference" />
+                <label class="form-check-label" for="notifyEmails">
+                    @(receiveEmails ? "I receive notification emails" : "Notification emails are turned off")
+                </label>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<Learner>? children;
+    private int? parentId;
+    private bool receiveEmails = true;
+    private bool isSavingPreference;
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         var userName = authState.User.Identity?.Name;
+
+        // The preference is always resolved from the signed-in user, never from a client-supplied id.
+        var parent = await DbContext.Parents.AsNoTracking()
+            .Where(p => p.User.UserName == userName)
+            .Select(p => new { p.ParentId, p.ReceiveNotificationEmails })
+            .FirstOrDefaultAsync();
+        if (parent != null)
+        {
+            parentId = parent.ParentId;
+            receiveEmails = parent.ReceiveNotificationEmails;
+        }
 
         var accessibleIds = await SchoolAuth.GetAccessibleLearnerIds(userName);
 
@@ -57,5 +90,23 @@ else
             .Include(l => l.Class)
             .Where(l => accessibleIds.Contains(l.LearnerId))
             .ToListAsync();
+    }
+
+    private async Task ToggleEmailsAsync(ChangeEventArgs e)
+    {
+        if (isSavingPreference || parentId == null) return;
+        isSavingPreference = true;
+        try
+        {
+            var parent = await DbContext.Parents.FirstOrDefaultAsync(p => p.ParentId == parentId);
+            if (parent == null) return;
+            parent.ReceiveNotificationEmails = e.Value is bool b && b;
+            await DbContext.SaveChangesAsync();
+            receiveEmails = parent.ReceiveNotificationEmails;
+        }
+        finally
+        {
+            isSavingPreference = false;
+        }
     }
 }

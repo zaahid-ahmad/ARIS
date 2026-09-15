@@ -1,0 +1,328 @@
+@page "/admin/messages"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using ARIS1.Data
+@using ARIS1.Models
+@using ARIS1.Services.Email
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@inject EmailService EmailService
+@inject ProgressSummaryService ProgressSummaryService
+
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <button class="nav-link @(tab == "compose" ? "active" : "")" @onclick='() => tab = "compose"'>
+            <i class="fas fa-envelope"></i> Message parents
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(tab == "reports" ? "active" : "")" @onclick='() => tab = "reports"'>
+            <i class="fas fa-file-lines"></i> Progress reports
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(tab == "alerts" ? "active" : "")" @onclick='() => tab = "alerts"'>
+            <i class="fas fa-bell"></i> Automatic alerts
+        </button>
+    </li>
+    <li class="nav-item ms-auto">
+        <a class="nav-link" href="/admin/email-log"><i class="fas fa-list-check"></i> Email Log</a>
+    </li>
+</ul>
+
+@if (!loaded)
+{
+    @* The composer shares this page's scoped DbContext, so it must not start loading until this page has
+       finished its own queries (two concurrent operations on one DbContext throw). *@
+    <p>Loading...</p>
+}
+else if (tab == "compose")
+{
+    <ParentMessageComposer />
+}
+else if (tab == "reports")
+{
+    @if (EmailService.DeliveryBlockedReason is { } blocked)
+    {
+        <div class="alert alert-warning py-2"><i class="fas fa-triangle-exclamation"></i> @blocked Reports will be recorded in the Email Log as skipped.</div>
+    }
+    @if (!string.IsNullOrEmpty(reportStatus))
+    {
+        <div class="alert alert-success">@reportStatus</div>
+    }
+    @if (!string.IsNullOrEmpty(reportError))
+    {
+        <div class="alert alert-danger">@reportError</div>
+    }
+
+    <div class="card">
+        <div class="card-header"><h5 class="mb-0">Send term progress reports to parents</h5></div>
+        <div class="card-body">
+            <p class="text-muted small">Each linked parent receives one email per child: term mark, year mark, attendance and risk level for every current-year subject, plus flagged topics.</p>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Grade</label>
+                    <select class="form-select" @bind="reportGrade" @bind:after="OnReportGradeChanged">
+                        <option value="0">-- Select grade --</option>
+                        @foreach (var g in grades)
+                        {
+                            <option value="@g">Grade @g</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Class (optional)</label>
+                    <select class="form-select" @bind="reportClassId" @bind:after="OnReportClassChanged" disabled="@(reportGrade == 0)">
+                        <option value="0">All classes</option>
+                        @foreach (var c in classes.Where(c => c.Grade == reportGrade))
+                        {
+                            <option value="@c.ClassId">@c.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Learner (optional)</label>
+                    <select class="form-select" @bind="reportLearnerId" @bind:after="ClearReport" disabled="@(reportGrade == 0)">
+                        <option value="0">All learners in selection</option>
+                        @foreach (var l in ReportLearnerOptions)
+                        {
+                            <option value="@l.LearnerId">@l.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Term</label>
+                    <select class="form-select" @bind="reportTerm" @bind:after="ClearReport">
+                        @foreach (var t in new[] { 1, 2, 3, 4 })
+                        {
+                            <option value="@t">Term @t</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            @if (reportGrade == 12 && reportTerm == 4)
+            {
+                <small class="text-muted d-block mt-2">Grade 12 has no Term 4 in ARIS; term marks will show as "–" (year marks still included).</small>
+            }
+            <button class="btn btn-outline-primary mt-3" @onclick="BuildReportsAsync" disabled="@isBuilding">
+                <i class="fas fa-eye"></i> @(isBuilding ? "Building reports…" : "Preview reports")
+            </button>
+        </div>
+    </div>
+
+    @if (reportBuild != null)
+    {
+        var sendable = reportBuild.Messages.Count;
+        <div class="card mt-4">
+            <div class="card-header"><h5 class="mb-0">Review before sending</h5></div>
+            <div class="card-body">
+                <p>
+                    <strong>@reportBuild.LearnerCount</strong> learner(s) selected ·
+                    <strong>@reportBuild.ParentCount</strong> linked parent(s) ·
+                    <strong>@sendable</strong> report email(s)
+                    @if (reportBuild.OptedOutCount > 0) { <span class="text-muted">· @reportBuild.OptedOutCount parent(s) opted out and will be skipped</span> }
+                </p>
+                @if (reportBuild.SampleHtml != null)
+                {
+                    <label class="form-label">Preview (first report)</label>
+                    <iframe sandbox srcdoc="@reportBuild.SampleHtml" title="Report preview"
+                            style="width:100%;height:520px;border:1px solid #dee2e6;border-radius:8px;background:#fff"></iframe>
+                }
+                @if (sendable == 0)
+                {
+                    <p class="text-muted mb-0">None of the selected learners have a linked parent account.</p>
+                }
+                else
+                {
+                    <div class="mt-3">
+                        <button class="btn btn-primary" @onclick="SendReportsAsync" disabled="@isSending">
+                            <i class="fas fa-paper-plane"></i> @(isSending ? "Queuing…" : $"Send {sendable} report(s)")
+                        </button>
+                        <button class="btn btn-secondary ms-2" @onclick="ClearReport" disabled="@isSending">Cancel</button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+else if (tab == "alerts")
+{
+    <div class="card" style="max-width:760px">
+        <div class="card-header"><h5 class="mb-0">Automatic parent risk alerts</h5></div>
+        <div class="card-body">
+            <p>When a teacher finishes capturing an assessment (clicks <strong>Done</strong> in Mark Entry), ARIS checks each learner that was marked. Linked parents are emailed when their child's risk in that subject becomes <strong>High</strong> or <strong>Critical</strong>, or the assessment produced a <strong>Critical</strong> topic intervention.</p>
+            <ul class="small text-muted">
+                <li>Parents are only emailed again if the level gets worse, so they aren't alerted every time marks are captured.</li>
+                <li>Parents who have turned off notification emails on their dashboard are skipped.</li>
+                <li>Every alert is recorded in the Email Log.</li>
+            </ul>
+            <div class="form-check form-switch fs-5">
+                <input class="form-check-input" type="checkbox" id="alertsEnabled" checked="@alertsEnabled"
+                       @onchange="ToggleAlertsAsync" disabled="@isSavingAlerts" />
+                <label class="form-check-label" for="alertsEnabled">@(alertsEnabled ? "Alerts are ON" : "Alerts are OFF")</label>
+            </div>
+            @if (!string.IsNullOrEmpty(alertsStatus))
+            {
+                <div class="text-success small mt-2">@alertsStatus</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private record LearnerOption(int LearnerId, string Name, int Grade, int ClassId);
+
+    private string tab = "compose";
+    private bool loaded;
+    private int schoolId;
+    private User? currentUser;
+
+    private List<SchoolClass> classes = new();
+    private List<int> grades = new();
+    private List<LearnerOption> learners = new();
+
+    private int reportGrade;
+    private int reportClassId;
+    private int reportLearnerId;
+    private int reportTerm = 1;
+    private ProgressReportBuild? reportBuild;
+    private bool isBuilding;
+    private bool isSending;
+    private string? reportStatus;
+    private string? reportError;
+
+    private bool alertsEnabled;
+    private bool isSavingAlerts;
+    private string? alertsStatus;
+
+    private IEnumerable<LearnerOption> ReportLearnerOptions =>
+        learners.Where(l => l.Grade == reportGrade && (reportClassId == 0 || l.ClassId == reportClassId));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUser = await UserManager.GetUserAsync(authState.User);
+        if (currentUser?.SchoolId == null)
+        {
+            loaded = true;
+            return;
+        }
+        schoolId = currentUser.SchoolId.Value;
+
+        classes = await DbContext.SchoolClasses.AsNoTracking()
+            .Where(c => c.SchoolId == schoolId)
+            .OrderBy(c => c.Grade).ThenBy(c => c.Name)
+            .ToListAsync();
+        grades = classes.Select(c => c.Grade).Distinct().OrderBy(g => g).ToList();
+        learners = await DbContext.Learners.AsNoTracking()
+            .Where(l => l.User.SchoolId == schoolId && l.Status == "Active")
+            .OrderBy(l => l.User.Fullname)
+            .Select(l => new LearnerOption(l.LearnerId, l.User.Fullname, l.Grade, l.ClassId))
+            .ToListAsync();
+
+        alertsEnabled = await DbContext.Schools.Where(s => s.SchoolId == schoolId).Select(s => s.ParentAlertsEnabled).FirstOrDefaultAsync();
+        loaded = true;
+    }
+
+    private void OnReportGradeChanged()
+    {
+        reportClassId = 0;
+        reportLearnerId = 0;
+        ClearReport();
+    }
+
+    private void OnReportClassChanged()
+    {
+        reportLearnerId = 0;
+        ClearReport();
+    }
+
+    private void ClearReport()
+    {
+        reportBuild = null;
+        reportStatus = null;
+        reportError = null;
+    }
+
+    private async Task BuildReportsAsync()
+    {
+        if (isBuilding) return;
+        ClearReport();
+
+        // Re-validate every bound id against the school-scoped lists loaded above.
+        if (!grades.Contains(reportGrade)) { reportError = "Select a grade."; return; }
+        if (reportClassId != 0 && !classes.Any(c => c.ClassId == reportClassId && c.Grade == reportGrade)) { reportError = "Select a valid class."; return; }
+        if (reportTerm is < 1 or > 4) { reportError = "Select a term."; return; }
+
+        var selection = ReportLearnerOptions.ToList();
+        if (reportLearnerId != 0)
+        {
+            selection = selection.Where(l => l.LearnerId == reportLearnerId).ToList();
+            if (selection.Count == 0) { reportError = "Select a valid learner."; return; }
+        }
+        if (selection.Count == 0) { reportError = "No learners match this selection."; return; }
+
+        isBuilding = true;
+        try
+        {
+            reportBuild = await ProgressSummaryService.BuildAsync(schoolId, selection.Select(l => l.LearnerId).ToList(),
+                reportTerm, Navigation.BaseUri, currentUser?.Id);
+        }
+        catch (Exception ex)
+        {
+            reportError = $"Could not build reports: {ex.Message}";
+        }
+        finally
+        {
+            isBuilding = false;
+        }
+    }
+
+    private async Task SendReportsAsync()
+    {
+        if (isSending || reportBuild == null) return;
+        isSending = true;
+        try
+        {
+            // Messages were built server-side from the validated selection; nothing client-supplied is re-used here.
+            var logs = await EmailService.QueueManyAsync(reportBuild.Messages);
+            var queued = logs.Count(l => l.Status == EmailStatuses.Queued);
+            var skipped = logs.Count - queued;
+            reportBuild = null;
+            reportStatus = $"{queued} progress report email(s) queued" + (skipped > 0 ? $"; {skipped} skipped (see Email Log)." : ".");
+        }
+        catch (Exception ex)
+        {
+            reportError = $"Could not send reports: {ex.Message}";
+        }
+        finally
+        {
+            isSending = false;
+        }
+    }
+
+    private async Task ToggleAlertsAsync(ChangeEventArgs e)
+    {
+        if (isSavingAlerts) return;
+        isSavingAlerts = true;
+        try
+        {
+            var school = await DbContext.Schools.FirstOrDefaultAsync(s => s.SchoolId == schoolId);
+            if (school == null) return;
+            school.ParentAlertsEnabled = e.Value is bool b && b;
+            school.LastModifiedDate = DateTime.UtcNow;
+            await DbContext.SaveChangesAsync();
+            alertsEnabled = school.ParentAlertsEnabled;
+            alertsStatus = alertsEnabled ? "Automatic alerts switched on." : "Automatic alerts switched off.";
+        }
+        finally
+        {
+            isSavingAlerts = false;
+        }
+    }
+}

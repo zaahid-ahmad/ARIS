@@ -1,0 +1,293 @@
+@page "/admin/email-log"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using ARIS1.Data
+@using ARIS1.Models
+@using ARIS1.Services.Email
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject EmailService EmailService
+
+@if (EmailService.DeliveryBlockedReason is { } blocked)
+{
+    <div class="alert alert-warning py-2"><i class="fas fa-triangle-exclamation"></i> @blocked</div>
+}
+else if (EmailService.IsRedirecting)
+{
+    <div class="alert alert-info py-2"><i class="fas fa-circle-info"></i> Test mode: emails are delivered to the configured test inbox instead of the listed recipient.</div>
+}
+
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <div class="alert alert-success alert-dismissible">
+        @statusMessage
+        <button type="button" class="btn-close" @onclick="() => statusMessage = null"></button>
+    </div>
+}
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label">Category</label>
+                <select class="form-select" @bind="filterCategory" @bind:after="ApplyFiltersAsync">
+                    <option value="">All</option>
+                    @foreach (var c in EmailCategories.All)
+                    {
+                        <option value="@c">@CategoryLabel(c)</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Status</label>
+                <select class="form-select" @bind="filterStatus" @bind:after="ApplyFiltersAsync">
+                    <option value="">All</option>
+                    @foreach (var s in EmailStatuses.All)
+                    {
+                        <option value="@s">@s</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">From</label>
+                <input type="date" class="form-control" @bind="filterFrom" @bind:after="ApplyFiltersAsync" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">To</label>
+                <input type="date" class="form-control" @bind="filterTo" @bind:after="ApplyFiltersAsync" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Recipient or subject</label>
+                <input class="form-control" placeholder="Search…" @bind="filterSearch" @bind:after="ApplyFiltersAsync" />
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-outline-secondary w-100" @onclick="LoadAsync" title="Refresh"><i class="fas fa-rotate"></i></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (rows == null)
+{
+    <p>Loading...</p>
+}
+else if (rows.Count == 0)
+{
+    <p class="text-muted">No emails match these filters.</p>
+}
+else
+{
+    <p class="text-muted small">@totalCount email(s)</p>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Created</th>
+                    <th>Category</th>
+                    <th>Recipient</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in rows)
+                {
+                    <tr>
+                        <td class="text-nowrap small">@row.CreatedUtc.ToLocalTime().ToString("dd MMM yyyy HH:mm")</td>
+                        <td><span class="badge bg-light text-dark border">@CategoryLabel(row.Category)</span></td>
+                        <td class="small">@row.ToAddress</td>
+                        <td class="small">@row.Subject</td>
+                        <td>
+                            <span class="badge @StatusBadge(row.Status)">@row.Status</span>
+                            @if (!string.IsNullOrEmpty(row.Error))
+                            {
+                                <div class="small text-muted" style="max-width:260px">@row.Error</div>
+                            }
+                        </td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => ViewAsync(row.EmailLogId)">View</button>
+                            @if (EmailService.CanRetry(new ARIS1.Models.EmailLog { Status = row.Status, Error = row.Error }))
+                            {
+                                <button class="btn btn-outline-primary btn-sm ms-1" @onclick="() => RetryAsync(row.EmailLogId)" disabled="@isRetrying">Retry</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageChanged="GoToPageAsync" />
+}
+
+@if (viewing != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@viewing.Subject</h5>
+                    <button type="button" class="btn-close" @onclick="() => viewing = null"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="row small mb-3">
+                        <dt class="col-sm-3">To</dt><dd class="col-sm-9">@viewing.ToAddress</dd>
+                        @if (viewing.DeliveredToAddress != null && viewing.DeliveredToAddress != viewing.ToAddress)
+                        {
+                            <dt class="col-sm-3">Delivered to</dt><dd class="col-sm-9">@viewing.DeliveredToAddress (test redirect)</dd>
+                        }
+                        <dt class="col-sm-3">Status</dt><dd class="col-sm-9">@viewing.Status @(viewing.SentUtc != null ? $"· sent {viewing.SentUtc.Value.ToLocalTime():dd MMM yyyy HH:mm}" : "")</dd>
+                        @if (viewing.SenderName != null)
+                        {
+                            <dt class="col-sm-3">Sent by</dt><dd class="col-sm-9">@viewing.SenderName</dd>
+                        }
+                    </dl>
+                    <iframe sandbox srcdoc="@viewing.BodyHtml" title="Email body"
+                            style="width:100%;height:480px;border:1px solid #dee2e6;border-radius:8px;background:#fff"></iframe>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => viewing = null">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private record EmailRow(int EmailLogId, DateTime CreatedUtc, string Category, string ToAddress, string Subject, string Status, string? Error);
+    private record EmailDetail(string Subject, string ToAddress, string? DeliveredToAddress, string Status, DateTime? SentUtc, string BodyHtml, string? SenderName);
+
+    private const int PageSize = 20;
+    private int schoolId;
+    private List<EmailRow>? rows;
+    private int totalCount;
+    private int currentPage = 1;
+    private int totalPages => (int)Math.Ceiling(totalCount / (double)PageSize);
+
+    private string filterCategory = string.Empty;
+    private string filterStatus = string.Empty;
+    private DateTime? filterFrom;
+    private DateTime? filterTo;
+    private string filterSearch = string.Empty;
+
+    private EmailDetail? viewing;
+    private bool isRetrying;
+    private string? statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.GetUserAsync(authState.User);
+        if (user?.SchoolId == null)
+        {
+            rows = new();
+            return;
+        }
+        schoolId = user.SchoolId.Value;
+        await LoadAsync();
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        currentPage = page;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        // Filtering and paging happen in SQL; bodies are only loaded when a row is viewed.
+        var query = DbContext.EmailLogs.AsNoTracking().Where(e => e.SchoolId == schoolId);
+
+        if (EmailCategories.All.Contains(filterCategory)) query = query.Where(e => e.Category == filterCategory);
+        if (EmailStatuses.All.Contains(filterStatus)) query = query.Where(e => e.Status == filterStatus);
+        if (filterFrom != null)
+        {
+            var fromUtc = filterFrom.Value.Date.ToUniversalTime();
+            query = query.Where(e => e.CreatedUtc >= fromUtc);
+        }
+        if (filterTo != null)
+        {
+            var toUtc = filterTo.Value.Date.AddDays(1).ToUniversalTime();
+            query = query.Where(e => e.CreatedUtc < toUtc);
+        }
+        if (!string.IsNullOrWhiteSpace(filterSearch))
+        {
+            var term = filterSearch.Trim();
+            query = query.Where(e => e.ToAddress.Contains(term) || e.Subject.Contains(term));
+        }
+
+        totalCount = await query.CountAsync();
+        if (currentPage > 1 && (currentPage - 1) * PageSize >= totalCount) currentPage = Math.Max(1, totalPages);
+
+        rows = await query
+            .OrderByDescending(e => e.CreatedUtc).ThenByDescending(e => e.EmailLogId)
+            .Skip((currentPage - 1) * PageSize)
+            .Take(PageSize)
+            .Select(e => new EmailRow(e.EmailLogId, e.CreatedUtc, e.Category, e.ToAddress, e.Subject, e.Status, e.Error))
+            .ToListAsync();
+    }
+
+    private async Task ViewAsync(int emailLogId)
+    {
+        var detail = await DbContext.EmailLogs.AsNoTracking()
+            .Where(e => e.EmailLogId == emailLogId && e.SchoolId == schoolId)
+            .Select(e => new { e.Subject, e.ToAddress, e.DeliveredToAddress, e.Status, e.SentUtc, e.BodyHtml, e.SentByUserId })
+            .FirstOrDefaultAsync();
+        if (detail == null) return;
+
+        var senderName = detail.SentByUserId == null
+            ? null
+            : await DbContext.Users.Where(u => u.Id == detail.SentByUserId).Select(u => u.Fullname).FirstOrDefaultAsync();
+
+        viewing = new EmailDetail(detail.Subject, detail.ToAddress, detail.DeliveredToAddress, detail.Status, detail.SentUtc, detail.BodyHtml, senderName);
+    }
+
+    private async Task RetryAsync(int emailLogId)
+    {
+        if (isRetrying) return;
+        isRetrying = true;
+        try
+        {
+            if (EmailService.DeliveryBlockedReason is { } reason)
+            {
+                statusMessage = $"Cannot retry: {reason}";
+                return;
+            }
+            statusMessage = await EmailService.RetryAsync(emailLogId, schoolId)
+                ? "Email re-queued for sending. Refresh in a moment to see the result."
+                : "That email can't be retried.";
+            await LoadAsync();
+        }
+        finally
+        {
+            isRetrying = false;
+        }
+    }
+
+    private static string CategoryLabel(string category) => category switch
+    {
+        EmailCategories.Account => "Account",
+        EmailCategories.RiskAlert => "Risk alert",
+        EmailCategories.StaffMessage => "Message",
+        EmailCategories.ProgressSummary => "Progress report",
+        _ => category
+    };
+
+    private static string StatusBadge(string status) => status switch
+    {
+        EmailStatuses.Sent => "bg-success",
+        EmailStatuses.Queued => "bg-info text-dark",
+        EmailStatuses.Failed => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

@@ -14,6 +14,7 @@
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject BulkUserImportService BulkImportService
+@inject ARIS1.Services.Email.AccountEmailService AccountEmailService
 
 <div class="d-flex gap-2 mb-3">
     <button class="btn btn-primary" @onclick='() => Navigation.NavigateTo("admin/users/create")'>+ Add New User</button>
@@ -178,6 +179,10 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="CancelReset">Cancel</button>
+                    <button class="btn btn-outline-primary" @onclick="EmailResetLink" disabled="@isEmailingReset"
+                            title="Email the user a secure link to choose their own password">
+                        @(isEmailingReset ? "Queuing…" : "Email reset link instead")
+                    </button>
                     <button class="btn btn-warning" @onclick="ConfirmResetPassword">Reset Password</button>
                 </div>
             </div>
@@ -334,6 +339,11 @@ else
                         Download CSV template
                     </a>
 
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="sendImportWelcome" @bind="sendImportWelcomeEmails" disabled="@isImporting" />
+                        <label class="form-check-label" for="sendImportWelcome">Send welcome emails (set-password link) to each created user</label>
+                    </div>
+
                     <InputFile OnChange="HandleFileSelected" accept=".csv,.xlsx,.xls" class="form-control" disabled="@isImporting" />
 
                     @if (!string.IsNullOrEmpty(importError))
@@ -447,6 +457,7 @@ else
 
     private bool showImportModal = false;
     private bool isImporting = false;
+    private bool sendImportWelcomeEmails = false;
     private string? importError;
     private List<ImportRowResult>? importResults;
     private string? credentialsDownloadUrl;
@@ -648,6 +659,38 @@ else
         catch (Exception ex)
         {
             resetMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private bool isEmailingReset;
+
+    private async Task EmailResetLink()
+    {
+        if (userToResetId == null || isEmailingReset) return;
+        isEmailingReset = true;
+        try
+        {
+            var user = await UserManager.FindByIdAsync(userToResetId);
+            if (user == null || user.SchoolId != currentSchoolId)
+            { resetMessage = "User no longer exists."; return; }
+
+            var log = await AccountEmailService.SendResetLinkAsync(user, Navigation.BaseUri, currentUserId);
+            if (log.Status == EmailStatuses.Skipped)
+            {
+                resetMessage = $"Email not sent: {log.Error}";
+                return;
+            }
+
+            successMessage = $"Password reset link emailed to {user.Email}.";
+            CancelReset();
+        }
+        catch (Exception ex)
+        {
+            resetMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isEmailingReset = false;
         }
     }
 
@@ -976,6 +1019,26 @@ else
 
             importResults = await BulkImportService.ImportAsync(rows, currentSchoolId.Value);
             successMessage = $"Import complete: {importResults.Count(r => r.Success)} of {importResults.Count} user(s) created.";
+
+            if (sendImportWelcomeEmails)
+            {
+                var queued = 0;
+                foreach (var row in importResults.Where(r => r.Success))
+                {
+                    try
+                    {
+                        var created = await UserManager.FindByEmailAsync(row.Email);
+                        if (created == null || created.SchoolId != currentSchoolId) continue;
+                        var log = await AccountEmailService.SendWelcomeAsync(created, row.Role, Navigation.BaseUri, currentUserId);
+                        if (log.Status == EmailStatuses.Queued) queued++;
+                    }
+                    catch
+                    {
+                        // One failed welcome email must not abort the rest; failures are visible in the Email Log.
+                    }
+                }
+                successMessage += $" {queued} welcome email(s) queued.";
+            }
             credentialsDownloadUrl = BuildCredentialsDownloadUrl(importResults);
             await LoadUsers();
         }

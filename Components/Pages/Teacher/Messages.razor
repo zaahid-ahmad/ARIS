@@ -1,0 +1,8 @@
+@page "/teacher/messages"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Teacher")]
+@rendermode InteractiveServer
+
+<p class="text-muted">Email the parents of learners in your subjects. Parents who have opted out of notification emails are skipped automatically.</p>
+
+<ParentMessageComposer />

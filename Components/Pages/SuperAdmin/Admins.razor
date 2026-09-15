@@ -8,6 +8,9 @@
 @rendermode InteractiveServer
 @inject UserManager<User> UserManager
 @inject AppDbContext DbContext
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ARIS1.Services.Email.AccountEmailService AccountEmailService
 
 
 <button class="btn btn-primary mb-3" @onclick="ShowAddAdminModal">+ Add Admin</button>
@@ -118,6 +121,10 @@ else
                             <div class="invalid-feedback">@schoolError</div>
                         }
                     </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="sendAdminWelcome" @bind="sendWelcomeEmail" />
+                        <label class="form-check-label" for="sendAdminWelcome">Send a welcome email with a link to set their own password</label>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => showAddAdminModal = false">Cancel</button>
@@ -206,6 +213,7 @@ else
     private string newAdminEmail = string.Empty;
     private int newAdminSchoolId = 0;
     private string tempPassword = string.Empty;
+    private bool sendWelcomeEmail = true;
 
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
@@ -307,6 +315,21 @@ else
             {
                 await UserManager.AddToRoleAsync(newAdmin, "Admin");
                 successMessage = $"Admin created! Temporary password: {tempPass}";
+
+                if (sendWelcomeEmail)
+                {
+                    try
+                    {
+                        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+                        var sender = await UserManager.GetUserAsync(authState.User);
+                        await AccountEmailService.SendWelcomeAsync(newAdmin, "Admin", Navigation.BaseUri, sender?.Id);
+                        successMessage += " A welcome email has been queued.";
+                    }
+                    catch (Exception emailEx)
+                    {
+                        successMessage += $" (Welcome email could not be queued: {emailEx.Message})";
+                    }
+                }
                 showAddAdminModal = false;
                 await LoadData();
             }

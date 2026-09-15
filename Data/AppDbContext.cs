@@ -34,6 +34,8 @@ namespace ARIS1.Data
         public DbSet<WeightingValidation> WeightingValidations { get; set; }
         public DbSet<LearnerYearRecord> LearnerYearRecords { get; set; }
         public DbSet<LearnerYearSubjectRisk> LearnerYearSubjectRisks { get; set; }
+        public DbSet<EmailLog> EmailLogs { get; set; }
+        public DbSet<ParentAlertState> ParentAlertStates { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -361,6 +363,46 @@ namespace ARIS1.Data
             builder.Entity<LearnerYearSubjectRisk>()
                 .Property(r => r.AttendancePercentage)
                 .HasColumnType("decimal(10,4)");
+
+            // ===== EMAIL =====
+            builder.Entity<EmailLog>()
+                .HasOne(e => e.School)
+                .WithMany()
+                .HasForeignKey(e => e.SchoolId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
+            builder.Entity<EmailLog>()
+                .HasIndex(e => new { e.SchoolId, e.CreatedUtc });
+
+            builder.Entity<EmailLog>()
+                .HasIndex(e => e.Status);
+
+            builder.Entity<EmailLog>().Property(e => e.Category).HasMaxLength(32);
+            builder.Entity<EmailLog>().Property(e => e.Status).HasMaxLength(16);
+            builder.Entity<EmailLog>().Property(e => e.ToAddress).HasMaxLength(256);
+            builder.Entity<EmailLog>().Property(e => e.DeliveredToAddress).HasMaxLength(256);
+            builder.Entity<EmailLog>().Property(e => e.Subject).HasMaxLength(300);
+            builder.Entity<EmailLog>().Property(e => e.Error).HasMaxLength(1000);
+
+            builder.Entity<ParentAlertState>()
+                .HasKey(s => new { s.LearnerId, s.SubjectId });
+
+            builder.Entity<ParentAlertState>()
+                .HasOne(s => s.Learner)
+                .WithMany()
+                .HasForeignKey(s => s.LearnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<ParentAlertState>()
+                .HasOne(s => s.Subject)
+                .WithMany()
+                .HasForeignKey(s => s.SubjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<Parent>()
+                .Property(p => p.ReceiveNotificationEmails)
+                .HasDefaultValue(true);
         }
     }
 }

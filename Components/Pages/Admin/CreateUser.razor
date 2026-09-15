@@ -11,6 +11,7 @@
 @inject NavigationManager Navigation
 @inject AppDbContext DbContext
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ARIS1.Services.Email.AccountEmailService AccountEmailService
 
 @if (!string.IsNullOrEmpty(successMessage))
 {
@@ -141,6 +142,10 @@
                 }
             </div>
         }
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="sendWelcome" @bind="sendWelcomeEmail" />
+            <label class="form-check-label" for="sendWelcome">Send a welcome email with a link to set their own password</label>
+        </div>
         <button class="btn btn-primary" @onclick="CreateUserAsync">Create User</button>
         <button class="btn btn-secondary ms-2" @onclick='() => Navigation.NavigateTo("/admin/users")'>Cancel</button>
     </div>
@@ -156,6 +161,7 @@
     private List<SchoolClass> gradeClasses = new();
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
+    private bool sendWelcomeEmail = true;
 
     private string? fullNameError;
     private string? emailError;
@@ -363,6 +369,20 @@
                 }
 
                 successMessage = $"{role} account created successfully!";
+
+                if (sendWelcomeEmail)
+                {
+                    // Queued, not sent inline; a delivery problem shows up in the Email Log, never blocks account creation.
+                    try
+                    {
+                        await AccountEmailService.SendWelcomeAsync(user, role, Navigation.BaseUri, currentAdmin.Id);
+                        successMessage += " A welcome email has been queued.";
+                    }
+                    catch (Exception emailEx)
+                    {
+                        successMessage += $" (Welcome email could not be queued: {emailEx.Message})";
+                    }
+                }
                 fullName = string.Empty;
                 email = string.Empty;
                 password = string.Empty;

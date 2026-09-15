@@ -298,6 +298,36 @@ body {
     display: block;
 }
 
+.login-link {
+    margin-top: 1rem;
+    text-align: center;
+    font-size: 0.8rem;
+}
+
+    .login-link a {
+        color: var(--blue);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+        .login-link a:hover {
+            text-decoration: underline;
+        }
+
+.login-heading {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 0.35rem;
+}
+
+.login-info {
+    font-size: 0.82rem;
+    color: var(--ink-3);
+    line-height: 1.55;
+    margin-bottom: 1.1rem;
+}
+
 /* ─── APP SHELL ─── */
 .app-shell {
     display: none;

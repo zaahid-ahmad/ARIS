@@ -13,6 +13,16 @@
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject InterventionService InterventionService
+@inject ARIS1.Services.Email.ParentAlertService ParentAlertService
+@inject NavigationManager Navigation
+
+@if (!string.IsNullOrEmpty(alertMessage))
+{
+    <div class="alert alert-info alert-dismissible">
+        <i class="fas fa-envelope"></i> @alertMessage
+        <button type="button" class="btn-close" @onclick="() => alertMessage = string.Empty"></button>
+    </div>
+}
 
 @if (!string.IsNullOrEmpty(errorMessage))
 {
@@ -92,7 +102,7 @@
                         Capture Marks — @selectedAssessment.Title
                         <small class="text-muted ms-2">(Max: @selectedAssessment.MaxMark.ToString("0.##"))</small>
                     </h5>
-                    <button type="button" class="btn-close" @onclick="CloseMarksModal"></button>
+                    <button type="button" class="btn-close" @onclick="CloseMarksModalAsync" disabled="@isClosingModal"></button>
                 </div>
                 <div class="modal-body">
                     @if (assessmentQuestions.Count == 0)
@@ -181,7 +191,9 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="CloseMarksModal">Done</button>
+                    <button type="button" class="btn btn-secondary" @onclick="CloseMarksModalAsync" disabled="@isClosingModal">
+                        @(isClosingModal ? "Saving…" : "Done")
+                    </button>
                 </div>
             </div>
         </div>
@@ -207,7 +219,13 @@
     private Assessment? selectedAssessment;
     private bool isModalOpen = false;
     private string errorMessage = string.Empty;
+    private string alertMessage = string.Empty;
     private Teacher? currentTeacher;
+
+    // Learners whose marks were saved while the capture modal was open; parent risk alerts are evaluated for
+    // these once the teacher clicks Done (not on every auto-save, where a half-typed mark could look Critical).
+    private readonly HashSet<int> savedLearnersThisSession = new();
+    private bool isClosingModal;
     private int? currentSchoolId;
 
     private int currentPage = 1;
@@ -311,6 +329,7 @@
 
     private async Task OpenMarksModal(Assessment assessment)
     {
+        alertMessage = string.Empty;
         if (!subjects.Any(s => s.SubjectId == assessment.SubjectId) ||
             assessment.SubjectId != selectedSubjectId)
         {
@@ -371,9 +390,63 @@
         }
     }
 
+    private async Task CloseMarksModalAsync()
+    {
+        if (isClosingModal) return;
+        isClosingModal = true;
+        try
+        {
+            var assessmentId = selectedAssessment?.AssessmentId;
+
+            // Flush edits still inside the 800ms debounce window rather than dropping them, after letting any
+            // in-flight saves finish (they share this component's DbContext).
+            var pending = debounceCts.Keys.ToList();
+            CancelAllDebounces();
+            await WaitForInFlightSavesAsync();
+            foreach (var learnerId in pending)
+            {
+                await SaveLearnerMarks(learnerId);
+            }
+
+            var alertLearnerIds = savedLearnersThisSession.ToList();
+            CloseMarksModal();
+
+            if (assessmentId != null && alertLearnerIds.Count > 0)
+            {
+                try
+                {
+                    var queued = await ParentAlertService.EvaluateAssessmentAsync(assessmentId.Value, alertLearnerIds, Navigation.BaseUri);
+                    if (queued > 0)
+                    {
+                        alertMessage = $"{queued} parent risk alert email(s) queued for learners whose risk level increased.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Marks are already saved; an alert problem must never look like a save failure.
+                    errorMessage = $"Marks saved, but parent alerts could not be evaluated: {ex.Message}";
+                }
+            }
+        }
+        finally
+        {
+            isClosingModal = false;
+        }
+    }
+
+    private async Task WaitForInFlightSavesAsync()
+    {
+        var giveUpAt = DateTime.UtcNow.AddSeconds(10);
+        while (learnerSaveStatus.Values.Any(s => s == LearnerSaveStatus.Saving) && DateTime.UtcNow < giveUpAt)
+        {
+            await Task.Delay(100);
+        }
+    }
+
     private void CloseMarksModal()
     {
         CancelAllDebounces();
+        savedLearnersThisSession.Clear();
         isModalOpen = false;
         selectedAssessment = null;
         assessmentQuestions.Clear();
@@ -408,6 +481,12 @@
         try
         {
             await Task.Delay(800, cts.Token);
+            // No longer pending once the save starts, so closing the modal won't save it a second time.
+            if (debounceCts.TryGetValue(learnerId, out var current) && current == cts)
+            {
+                debounceCts.Remove(learnerId);
+                cts.Dispose();
+            }
             await SaveLearnerMarks(learnerId);
         }
         catch (OperationCanceledException)
@@ -520,6 +599,7 @@
             }
 
             learnerSaveStatus[learnerId] = LearnerSaveStatus.Saved;
+            savedLearnersThisSession.Add(learnerId);
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)

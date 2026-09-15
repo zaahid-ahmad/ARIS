@@ -19,6 +19,14 @@ dotnet ef database update
 
 # Revert to a specific migration
 dotnet ef database update <MigrationName>
+
+# Email (SMTP) — without Email:Host, emails are logged as Skipped instead of sent
+dotnet user-secrets set "Email:Host" "smtp-relay.brevo.com"   # or smtp.gmail.com
+dotnet user-secrets set "Email:Port" "587"
+dotnet user-secrets set "Email:Username" "<smtp login>"
+dotnet user-secrets set "Email:Password" "<smtp key / app password>"
+dotnet user-secrets set "Email:FromAddress" "<verified sender>"
+dotnet user-secrets set "Email:RedirectAllTo" "<your own inbox>"   # required in Development
 ```
 
 The app runs at `http://aris1.dev.localhost:5149` (or `https://aris1.dev.localhost:7124`).
@@ -107,10 +115,20 @@ A year's risk assessment doesn't just vanish once the next rollover moves a lear
 
 `Learner.Status` (`"Active"`/`"Graduated"`) is filtered into `UserManagement.razor`'s default listing (with an "Include graduated learners" toggle), `LearnerEnrollment.razor`'s grade-based picker, and `BulkSubjectAllocationService`'s class-roster query, so graduated learners stop resurfacing in current-year pickers. Teacher/Parent pages need no such filter — they're scoped to current-year `LearnerSubject` enrollments (Teacher) or intentionally still show a graduated child's history (Parent). The Teacher-side scoping is an explicit `Subject.AcademicYear == currentYear` filter (`currentYear` resolved the same way as `YearRolloverService.ResolveYearsAsync`: `MAX(Subject.AcademicYear)` for the school, falling back to `DateTime.Now.Year`) on every Teacher page's subject/roster query (`Marks.razor`, `Attendance.razor`, `AtRisk.razor`, `Dashboard.razor`, `LearnerProfiles.razor`) — this filter was missing entirely until it was added, so a new Teacher page must add it too rather than assume `TeacherId`/`SchoolId` alone is enough; without it, a rolled-over school's cloned same-named/same-teacher `Subject` rows across multiple years blend together since `YearRolloverService` never deletes a prior year's `LearnerSubject` rows.
 
+### Email
+
+All email goes through `Services/Email/`. Pages never talk to SMTP: `EmailService.QueueAsync`/`QueueManyAsync` writes an `EmailLog` row (`Queued`) and hands its id to `EmailQueue` (in-memory `Channel<int>`); `EmailBackgroundService` (hosted service) sends via MailKit SMTP, throttled by `Email:SendsPerMinute`, and marks the row `Sent`/`Failed`. Rows still `Queued` are re-queued on startup. Rows that can't/shouldn't send are written `Skipped` with the reason in `Error`: delivery not configured, **Development without `Email:RedirectAllTo`** (hard guard — seeded Riverside parents have realistic `@gmail.com`/`@outlook.com` addresses), no address, or a parent who opted out (`Parent.ReceiveNotificationEmails == false`, non-`Account` categories only). `Email:RedirectAllTo` delivers everything to one inbox with `[To: original]` in the subject.
+
+Four categories (`EmailCategories`): `Account` (Identity's `IEmailSender<User>` → `IdentityEmailSender`, so Forgot Password works; `AccountEmailService` for staff-triggered welcome/reset emails — always a set-password link built like `ForgotPassword.razor`, never a password, and the welcome email includes the School Code the login page requires), `StaffMessage` (`Components/Shared/ParentMessageComposer.razor`, hosted by `Admin/Messages.razor` and `Teacher/Messages.razor`; Admin targets school/grade/class/learner, Teacher only their current-year subjects; every bound id re-validated at preview and again at send; preview-then-confirm), `RiskAlert` (`ParentAlertService.EvaluateAssessmentAsync`, called from `Teacher/Marks.razor`'s `CloseMarksModalAsync` on Done — not on the 800ms auto-save — only when `School.ParentAlertsEnabled`; effective level Critical if subject risk is Critical or the assessment produced a Critical intervention, High if risk is High; `ParentAlertState (LearnerId, SubjectId)` stores the last alerted level so parents are only re-alerted when it worsens), `ProgressSummary` (`ProgressSummaryService`, Admin "Progress reports" tab — batched per subject, same numbers as `WeightCalculationService`/`RiskAssessmentService`). Recipients always resolve learners → `ParentLearner` → active parent users via `ParentRecipientService`. `Admin/EmailLog.razor` is the audit view (server-side paging/filters, body viewer in a sandboxed iframe, Retry only for `Failed` or config-`Skipped` rows via `EmailService.CanRetry`). Templates (`EmailTemplates`) use inline styles and HTML-encode every dynamic value.
+
+**Gotcha:** a page that hosts a child component which also queries the scoped `AppDbContext` in `OnInitializedAsync` must not render that child until its own queries finish — both run concurrently during prerender and EF throws "A second operation was started on this context instance" (hit on `Admin/Messages.razor`; fixed with a `loaded` flag).
+
 ### Database & Seeding
 
 `AppDbContext` extends `IdentityDbContext<User>`. On startup, `DbSeeder.SeedAsync()` creates the five roles, a `Default School`, and default accounts:
 - `superadmin@aris.com` / `SuperAdmin@1234`
 - `admin@aris.com` / `Admin@1234`
+
+Demo accounts (`DemoDataSeeder`, school code `RIVERSIDE`) use `Admin@1234` / `Teacher@1234` / `Learner@1234` / `Parent@1234`.
 
 Most FK relationships use `DeleteBehavior.Restrict` to avoid SQL Server cascade path conflicts. Exceptions: `AssessmentQuestion → Cascade`, `Intervention → Learner Cascade`, `WeightingNode → WeightingStructure Cascade`.

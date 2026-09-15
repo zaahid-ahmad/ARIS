@@ -84,7 +84,18 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
 
-builder.Services.AddSingleton<IEmailSender<User>, ARIS1.Components.Account.NoOpEmailSender>();
+// Email: pages queue EmailLog rows via EmailService; EmailBackgroundService sends them over SMTP (MailKit).
+// Configure with user-secrets (Email:Host, Email:Port, Email:Username, Email:Password, Email:FromAddress,
+// Email:FromName, Email:RedirectAllTo). Without Email:Host, emails are logged as Skipped instead of sent.
+builder.Services.Configure<ARIS1.Services.Email.EmailOptions>(builder.Configuration.GetSection("Email"));
+builder.Services.AddSingleton<ARIS1.Services.Email.EmailQueue>();
+builder.Services.AddHostedService<ARIS1.Services.Email.EmailBackgroundService>();
+builder.Services.AddScoped<ARIS1.Services.Email.EmailService>();
+builder.Services.AddScoped<ARIS1.Services.Email.AccountEmailService>();
+builder.Services.AddScoped<ARIS1.Services.Email.ParentRecipientService>();
+builder.Services.AddScoped<ARIS1.Services.Email.ParentAlertService>();
+builder.Services.AddScoped<ARIS1.Services.Email.ProgressSummaryService>();
+builder.Services.AddScoped<IEmailSender<User>, ARIS1.Services.Email.IdentityEmailSender>();
 
 var app = builder.Build();
 

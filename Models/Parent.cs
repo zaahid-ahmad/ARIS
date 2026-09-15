@@ -9,6 +9,10 @@ namespace ARIS1.Models
         public string UserId { get; set; } = string.Empty;
         public User User { get; set; } = null!;
 
+        // Opt-out for non-essential email (risk alerts, staff messages, progress summaries).
+        // Account emails such as password resets are always sent.
+        public bool ReceiveNotificationEmails { get; set; } = true;
+
         public ICollection<ParentLearner> Children { get; set; } = new List<ParentLearner>();
     }
 }

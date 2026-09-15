@@ -1,0 +1,446 @@
+@using ARIS1.Data
+@using ARIS1.Models
+@using ARIS1.Services.Email
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext DbContext
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ParentRecipientService RecipientService
+@inject EmailService EmailService
+
+@* Compose-and-send to parents. Admins can target the whole school, a grade, a class or one learner;
+   teachers only the learners in their own current-year subjects. Every selection is re-validated
+   server-side at preview and again at send time (bound ids can be tampered with over the circuit). *@
+
+@if (!string.IsNullOrEmpty(loadError))
+{
+    <div class="alert alert-danger">@loadError</div>
+    return;
+}
+
+@if (EmailService.DeliveryBlockedReason is { } blocked)
+{
+    <div class="alert alert-warning py-2"><i class="fas fa-triangle-exclamation"></i> @blocked Messages will be recorded in the Email Log as skipped.</div>
+}
+else if (EmailService.IsRedirecting)
+{
+    <div class="alert alert-info py-2"><i class="fas fa-circle-info"></i> Test mode: all emails are redirected to the configured test inbox.</div>
+}
+
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <div class="alert alert-success">@statusMessage</div>
+}
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">Recipients</h5></div>
+            <div class="card-body">
+                <label class="form-label">Send to parents of</label>
+                <select class="form-select mb-3" @bind="scope" @bind:after="ClearPreview">
+                    @if (isAdmin)
+                    {
+                        <option value="School">All learners in the school</option>
+                        <option value="Grade">A grade</option>
+                        <option value="Class">A class</option>
+                        <option value="Learner">One learner</option>
+                    }
+                    else
+                    {
+                        <option value="Subject">All learners in one of my subjects</option>
+                        <option value="Learner">One learner in one of my subjects</option>
+                    }
+                </select>
+
+                @if (isAdmin && scope == "Grade")
+                {
+                    <label class="form-label">Grade</label>
+                    <select class="form-select mb-3" @bind="selectedGrade" @bind:after="ClearPreview">
+                        <option value="0">-- Select grade --</option>
+                        @foreach (var g in grades)
+                        {
+                            <option value="@g">Grade @g</option>
+                        }
+                    </select>
+                }
+
+                @if (isAdmin && scope == "Class")
+                {
+                    <label class="form-label">Class</label>
+                    <select class="form-select mb-3" @bind="selectedClassId" @bind:after="ClearPreview">
+                        <option value="0">-- Select class --</option>
+                        @foreach (var c in classes)
+                        {
+                            <option value="@c.ClassId">Grade @c.Grade – @c.Name</option>
+                        }
+                    </select>
+                }
+
+                @if (isAdmin && scope == "Learner")
+                {
+                    <label class="form-label">Learner</label>
+                    <input class="form-control mb-2" placeholder="Search by name…" @bind="learnerSearch" @bind:event="oninput" />
+                    <select class="form-select mb-3" @bind="selectedLearnerId" @bind:after="ClearPreview">
+                        <option value="0">-- Select learner --</option>
+                        @foreach (var l in FilteredSchoolLearners)
+                        {
+                            <option value="@l.LearnerId">@l.Name (Grade @l.Grade @l.ClassName)</option>
+                        }
+                    </select>
+                }
+
+                @if (!isAdmin)
+                {
+                    <label class="form-label">Subject</label>
+                    <select class="form-select mb-3" @bind="selectedSubjectId" @bind:after="OnSubjectChanged">
+                        <option value="0">-- Select subject --</option>
+                        @foreach (var s in teacherSubjects)
+                        {
+                            <option value="@s.SubjectId">@s.Name (Grade @s.Grade)</option>
+                        }
+                    </select>
+
+                    @if (scope == "Learner" && selectedSubjectId != 0)
+                    {
+                        <label class="form-label">Learner</label>
+                        <select class="form-select mb-3" @bind="selectedLearnerId" @bind:after="ClearPreview">
+                            <option value="0">-- Select learner --</option>
+                            @foreach (var l in subjectLearners)
+                            {
+                                <option value="@l.LearnerId">@l.Name</option>
+                            }
+                        </select>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">Message</h5></div>
+            <div class="card-body">
+                <label class="form-label">Subject <span class="text-danger">*</span></label>
+                <input class="form-control mb-3" maxlength="150" @bind="messageSubject" @bind:event="oninput" @bind:after="ClearPreview"
+                       placeholder="e.g. Term 3 parent evening" />
+
+                <label class="form-label">Message <span class="text-danger">*</span></label>
+                <textarea class="form-control mb-1" rows="8" maxlength="5000" @bind="messageBody" @bind:event="oninput" @bind:after="ClearPreview"
+                          placeholder="Write your message. Leave a blank line between paragraphs."></textarea>
+                <small class="text-muted d-block mb-3">Each parent's email starts with "Dear [name]" and names their child(ren) at the bottom.</small>
+
+                <button class="btn btn-outline-primary" @onclick="PreviewAsync" disabled="@(isWorking)">
+                    <i class="fas fa-eye"></i> Preview recipients
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (recipients != null)
+{
+    <div class="card mt-4">
+        <div class="card-header"><h5 class="mb-0">Review before sending: @scopeDescription</h5></div>
+        <div class="card-body">
+            @{
+                var sendable = recipients.Count(r => !r.OptedOut && !string.IsNullOrWhiteSpace(r.Email));
+                var optedOut = recipients.Count(r => r.OptedOut);
+                var noEmail = recipients.Count(r => string.IsNullOrWhiteSpace(r.Email));
+            }
+            @if (recipients.Count == 0)
+            {
+                <p class="text-muted mb-0">No linked parent accounts were found for this selection.</p>
+            }
+            else
+            {
+                <p>
+                    <strong>@sendable</strong> parent(s) will receive this email.
+                    @if (optedOut > 0) { <span class="text-muted"> @optedOut opted out of notification emails.</span> }
+                    @if (noEmail > 0) { <span class="text-muted"> @noEmail have no email address.</span> }
+                </p>
+
+                <details class="mb-3">
+                    <summary>Show recipients</summary>
+                    <ul class="small mt-2 mb-0" style="max-height:200px;overflow-y:auto">
+                        @foreach (var r in recipients)
+                        {
+                            <li>
+                                @r.Fullname (@string.Join(", ", r.Children.Select(c => c.Name)))
+                                @if (r.OptedOut) { <span class="badge bg-secondary ms-1">opted out</span> }
+                            </li>
+                        }
+                    </ul>
+                </details>
+
+                @if (previewHtml != null)
+                {
+                    <label class="form-label">Preview (first recipient)</label>
+                    <iframe sandbox srcdoc="@previewHtml" title="Email preview"
+                            style="width:100%;height:420px;border:1px solid #dee2e6;border-radius:8px;background:#fff"></iframe>
+                }
+
+                <div class="mt-3">
+                    <button class="btn btn-primary" @onclick="SendAsync" disabled="@(isWorking || sendable == 0)">
+                        <i class="fas fa-paper-plane"></i> @(isWorking ? "Sending…" : $"Send to {sendable} parent(s)")
+                    </button>
+                    <button class="btn btn-secondary ms-2" @onclick="ClearPreview" disabled="@isWorking">Cancel</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private record LearnerOption(int LearnerId, string Name, int Grade, string ClassName);
+    private record SubjectOption(int SubjectId, string Name, int Grade);
+
+    private bool isAdmin;
+    private int schoolId;
+    private string? schoolName;
+    private User? sender;
+    private string? loadError;
+
+    // Admin scope data
+    private List<SchoolClass> classes = new();
+    private List<int> grades = new();
+    private List<LearnerOption> schoolLearners = new();
+    private string learnerSearch = string.Empty;
+
+    // Teacher scope data
+    private List<SubjectOption> teacherSubjects = new();
+    private List<LearnerOption> subjectLearners = new();
+
+    private string scope = string.Empty;
+    private int selectedGrade;
+    private int selectedClassId;
+    private int selectedSubjectId;
+    private int selectedLearnerId;
+
+    private string messageSubject = string.Empty;
+    private string messageBody = string.Empty;
+
+    private List<ParentRecipient>? recipients;
+    private string? previewHtml;
+    private string scopeDescription = string.Empty;
+    private bool isWorking;
+    private string? statusMessage;
+    private string? errorMessage;
+
+    private IEnumerable<LearnerOption> FilteredSchoolLearners =>
+        (string.IsNullOrWhiteSpace(learnerSearch)
+            ? schoolLearners
+            : schoolLearners.Where(l => l.Name.Contains(learnerSearch, StringComparison.OrdinalIgnoreCase)))
+        .Take(100);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        sender = await UserManager.GetUserAsync(authState.User);
+        if (sender?.SchoolId == null)
+        {
+            loadError = "You are not assigned to a school.";
+            return;
+        }
+
+        schoolId = sender.SchoolId.Value;
+        schoolName = await DbContext.Schools.Where(s => s.SchoolId == schoolId).Select(s => s.Name).FirstOrDefaultAsync();
+        isAdmin = authState.User.IsInRole("Admin");
+
+        if (isAdmin)
+        {
+            scope = "School";
+            classes = await DbContext.SchoolClasses.AsNoTracking()
+                .Where(c => c.SchoolId == schoolId)
+                .OrderBy(c => c.Grade).ThenBy(c => c.Name)
+                .ToListAsync();
+            grades = classes.Select(c => c.Grade).Distinct().OrderBy(g => g).ToList();
+            schoolLearners = await DbContext.Learners.AsNoTracking()
+                .Where(l => l.User.SchoolId == schoolId && l.Status == "Active")
+                .OrderBy(l => l.User.Fullname)
+                .Select(l => new LearnerOption(l.LearnerId, l.User.Fullname, l.Grade, l.Class.Name))
+                .ToListAsync();
+        }
+        else
+        {
+            scope = "Subject";
+            var teacher = await DbContext.Teachers.AsNoTracking().FirstOrDefaultAsync(t => t.UserId == sender.Id);
+            if (teacher == null)
+            {
+                loadError = "You are not registered as a teacher.";
+                return;
+            }
+
+            var currentYear = await DbContext.Subjects
+                .Where(s => s.SchoolId == schoolId)
+                .Select(s => (int?)s.AcademicYear)
+                .MaxAsync() ?? DateTime.Now.Year;
+
+            teacherSubjects = await DbContext.Subjects.AsNoTracking()
+                .Where(s => s.TeacherId == teacher.TeacherId && s.SchoolId == schoolId && s.AcademicYear == currentYear)
+                .OrderBy(s => s.Grade).ThenBy(s => s.Name)
+                .Select(s => new SubjectOption(s.SubjectId, s.Name, s.Grade))
+                .ToListAsync();
+        }
+    }
+
+    private async Task OnSubjectChanged()
+    {
+        ClearPreview();
+        selectedLearnerId = 0;
+        subjectLearners = new();
+        if (!teacherSubjects.Any(s => s.SubjectId == selectedSubjectId)) return;
+
+        subjectLearners = await DbContext.LearnerSubjects.AsNoTracking()
+            .Where(ls => ls.SubjectId == selectedSubjectId)
+            .OrderBy(ls => ls.Learner.User.Fullname)
+            .Select(ls => new LearnerOption(ls.LearnerId, ls.Learner.User.Fullname, ls.Learner.Grade, ls.Learner.Class.Name))
+            .ToListAsync();
+    }
+
+    private void ClearPreview()
+    {
+        recipients = null;
+        previewHtml = null;
+        statusMessage = null;
+        errorMessage = null;
+    }
+
+    // Re-validates the current selection against the already school/teacher-scoped lists and returns the
+    // learner ids it covers, or an error.
+    private async Task<(List<int> LearnerIds, string Description, string? Error)> ResolveLearnersAsync()
+    {
+        if (isAdmin)
+        {
+            switch (scope)
+            {
+                case "School":
+                    return (schoolLearners.Select(l => l.LearnerId).ToList(), "all parents in the school", null);
+                case "Grade":
+                    if (!grades.Contains(selectedGrade)) return (new(), "", "Select a grade.");
+                    return (await ActiveSchoolLearners().Where(l => l.Grade == selectedGrade).Select(l => l.LearnerId).ToListAsync(),
+                        $"parents of Grade {selectedGrade}", null);
+                case "Class":
+                    var cls = classes.FirstOrDefault(c => c.ClassId == selectedClassId);
+                    if (cls == null) return (new(), "", "Select a class.");
+                    return (await ActiveSchoolLearners().Where(l => l.ClassId == cls.ClassId).Select(l => l.LearnerId).ToListAsync(),
+                        $"parents of Grade {cls.Grade} class {cls.Name}", null);
+                case "Learner":
+                    var learner = schoolLearners.FirstOrDefault(l => l.LearnerId == selectedLearnerId);
+                    if (learner == null) return (new(), "", "Select a learner.");
+                    return (new List<int> { learner.LearnerId }, $"parents of {learner.Name}", null);
+            }
+            return (new(), "", "Choose who to send to.");
+        }
+
+        var subject = teacherSubjects.FirstOrDefault(s => s.SubjectId == selectedSubjectId);
+        if (subject == null) return (new(), "", "Select one of your subjects.");
+
+        if (scope == "Learner")
+        {
+            var enrolled = await DbContext.LearnerSubjects
+                .AnyAsync(ls => ls.SubjectId == subject.SubjectId && ls.LearnerId == selectedLearnerId);
+            if (!enrolled) return (new(), "", "Select a learner in this subject.");
+            var name = subjectLearners.FirstOrDefault(l => l.LearnerId == selectedLearnerId)?.Name ?? "the learner";
+            return (new List<int> { selectedLearnerId }, $"parents of {name} ({subject.Name})", null);
+        }
+
+        var ids = await DbContext.LearnerSubjects
+            .Where(ls => ls.SubjectId == subject.SubjectId)
+            .Select(ls => ls.LearnerId)
+            .ToListAsync();
+        return (ids, $"parents of learners in {subject.Name} (Grade {subject.Grade})", null);
+    }
+
+    private IQueryable<Learner> ActiveSchoolLearners() =>
+        DbContext.Learners.Where(l => l.User.SchoolId == schoolId && l.Status == "Active");
+
+    private bool ValidateMessage()
+    {
+        if (string.IsNullOrWhiteSpace(messageSubject)) { errorMessage = "Enter a subject."; return false; }
+        if (string.IsNullOrWhiteSpace(messageBody)) { errorMessage = "Enter a message."; return false; }
+        return true;
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (isWorking) return;
+        ClearPreview();
+        if (!ValidateMessage()) return;
+
+        isWorking = true;
+        try
+        {
+            var (learnerIds, description, error) = await ResolveLearnersAsync();
+            if (error != null) { errorMessage = error; return; }
+
+            recipients = await RecipientService.ResolveAsync(learnerIds, schoolId);
+            scopeDescription = description;
+
+            var sample = recipients.FirstOrDefault(r => !r.OptedOut) ?? recipients.FirstOrDefault();
+            if (sample != null)
+            {
+                previewHtml = Render(sample).Html;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not build the recipient list: {ex.Message}";
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (isWorking || recipients == null) return;
+        errorMessage = null;
+        if (!ValidateMessage()) return;
+
+        isWorking = true;
+        try
+        {
+            // Re-resolve at send time rather than trusting the previewed list.
+            var (learnerIds, description, error) = await ResolveLearnersAsync();
+            if (error != null) { errorMessage = error; return; }
+            var finalRecipients = await RecipientService.ResolveAsync(learnerIds, schoolId);
+
+            var messages = finalRecipients.Select(r =>
+            {
+                var rendered = Render(r);
+                return new EmailMessage(r.Email, rendered.Subject, rendered.Html, rendered.Text, EmailCategories.StaffMessage,
+                    schoolId, r.UserId, r.Children.Count == 1 ? r.Children[0].LearnerId : null, sender?.Id);
+            });
+
+            var logs = await EmailService.QueueManyAsync(messages);
+            var queued = logs.Count(l => l.Status == EmailStatuses.Queued);
+            var skipped = logs.Count - queued;
+
+            recipients = null;
+            previewHtml = null;
+            statusMessage = $"Message to {description} queued for {queued} parent(s)" +
+                            (skipped > 0 ? $"; {skipped} skipped (see Email Log for reasons)." : ".");
+            messageSubject = string.Empty;
+            messageBody = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not send the message: {ex.Message}";
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+
+    private RenderedEmail Render(ParentRecipient r) =>
+        EmailTemplates.StaffMessage(r.Fullname, r.Children.Select(c => c.Name), sender?.Fullname ?? "Your school",
+            messageSubject.Trim(), messageBody.Trim(), schoolName);
+}

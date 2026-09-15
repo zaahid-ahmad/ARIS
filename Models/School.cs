@@ -12,6 +12,9 @@
         public DateTime LastModifiedDate { get; set; } = DateTime.UtcNow;
         public bool IsActive { get; set; } = true;
 
+        // Automatic parent risk-alert emails (ParentAlertService). Off by default; Admin switches it on.
+        public bool ParentAlertsEnabled { get; set; } = false;
+
         // Navigation
         public ICollection<User> Users { get; set; } = new List<User>();
         public ICollection<Subject> Subjects { get; set; } = new List<Subject>();
