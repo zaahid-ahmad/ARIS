@@ -1,0 +1,31 @@
+@page "/learner/resources"
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Services.Resources
+@attribute [Authorize(Roles = "Learner")]
+@rendermode InteractiveServer
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ResourceAccessService Access
+
+@if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <p class="text-muted">Study materials your teachers have shared for your subjects.</p>
+    <ResourceBrowser Subjects="subjects" SelectedSubjectId="Subject"
+                     EmptyMessage="You aren't enrolled in any subjects this year." />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "subject")]
+    public int? Subject { get; set; }
+
+    private List<ResourceSubject>? subjects;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        subjects = await Access.GetViewableSubjectsAsync(authState.User);
+    }
+}

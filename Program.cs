@@ -95,6 +95,10 @@ builder.Services.AddScoped<ARIS1.Services.Email.AccountEmailService>();
 builder.Services.AddScoped<ARIS1.Services.Email.ParentRecipientService>();
 builder.Services.AddScoped<ARIS1.Services.Email.ParentAlertService>();
 builder.Services.AddScoped<ARIS1.Services.Email.ProgressSummaryService>();
+
+// Learning resources: private file storage (outside wwwroot) + access rules shared by pages and the download endpoint.
+builder.Services.AddSingleton<ARIS1.Services.Resources.ResourceFileStore>();
+builder.Services.AddScoped<ARIS1.Services.Resources.ResourceAccessService>();
 builder.Services.AddScoped<IEmailSender<User>, ARIS1.Services.Email.IdentityEmailSender>();
 
 var app = builder.Build();
@@ -116,6 +120,7 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.MapAdditionalIdentityEndpoints();
+app.MapResourceEndpoints();
 
 // Seed roles and admin account
 using (var scope = app.Services.CreateScope())

@@ -36,6 +36,7 @@ namespace ARIS1.Data
         public DbSet<LearnerYearSubjectRisk> LearnerYearSubjectRisks { get; set; }
         public DbSet<EmailLog> EmailLogs { get; set; }
         public DbSet<ParentAlertState> ParentAlertStates { get; set; }
+        public DbSet<LearningResource> LearningResources { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -403,6 +404,38 @@ namespace ARIS1.Data
             builder.Entity<Parent>()
                 .Property(p => p.ReceiveNotificationEmails)
                 .HasDefaultValue(true);
+
+            // ===== LEARNING RESOURCES =====
+            builder.Entity<LearningResource>()
+                .HasOne(r => r.School)
+                .WithMany()
+                .HasForeignKey(r => r.SchoolId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<LearningResource>()
+                .HasOne(r => r.Subject)
+                .WithMany()
+                .HasForeignKey(r => r.SubjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<LearningResource>()
+                .HasOne(r => r.UploadedBy)
+                .WithMany()
+                .HasForeignKey(r => r.UploadedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<LearningResource>()
+                .HasIndex(r => new { r.SubjectId, r.IsActive });
+
+            builder.Entity<LearningResource>().Property(r => r.Title).HasMaxLength(200);
+            builder.Entity<LearningResource>().Property(r => r.Description).HasMaxLength(1000);
+            builder.Entity<LearningResource>().Property(r => r.Type).HasMaxLength(20);
+            builder.Entity<LearningResource>().Property(r => r.Category).HasMaxLength(100);
+            builder.Entity<LearningResource>().Property(r => r.StoredFileName).HasMaxLength(100);
+            builder.Entity<LearningResource>().Property(r => r.OriginalFileName).HasMaxLength(255);
+            builder.Entity<LearningResource>().Property(r => r.ContentType).HasMaxLength(100);
+            builder.Entity<LearningResource>().Property(r => r.ExternalUrl).HasMaxLength(2000);
+            builder.Entity<LearningResource>().Property(r => r.IsActive).HasDefaultValue(true);
         }
     }
 }

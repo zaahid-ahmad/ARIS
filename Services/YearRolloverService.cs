@@ -323,6 +323,36 @@ namespace ARIS1.Services
                 });
             }
 
+            // Learning resources carry over so teachers don't re-upload every year. Only active ones; the copy
+            // points at the same stored file (files are never physically deleted, so sharing is safe).
+            var oldResources = await _dbContext.LearningResources
+                .AsNoTracking()
+                .Where(r => oldSubjectIds.Contains(r.SubjectId) && r.IsActive)
+                .ToListAsync();
+
+            foreach (var oldResource in oldResources)
+            {
+                _dbContext.LearningResources.Add(new LearningResource
+                {
+                    SchoolId = oldResource.SchoolId,
+                    SubjectId = subjectMap[oldResource.SubjectId].SubjectId,
+                    Title = oldResource.Title,
+                    Description = oldResource.Description,
+                    Type = oldResource.Type,
+                    Category = oldResource.Category,
+                    Term = oldResource.Term,
+                    StoredFileName = oldResource.StoredFileName,
+                    OriginalFileName = oldResource.OriginalFileName,
+                    ContentType = oldResource.ContentType,
+                    FileSizeBytes = oldResource.FileSizeBytes,
+                    ExternalUrl = oldResource.ExternalUrl,
+                    UploadedByUserId = oldResource.UploadedByUserId,
+                    IsActive = true,
+                    CreatedUtc = DateTime.UtcNow,
+                    UpdatedUtc = DateTime.UtcNow
+                });
+            }
+
             var oldStructures = await _dbContext.WeightingStructures
                 .Where(ws => oldSubjectIds.Contains(ws.SubjectId))
                 .ToListAsync();

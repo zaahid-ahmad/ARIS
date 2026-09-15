@@ -1,0 +1,61 @@
+@page "/parent/resources/{LearnerId:int}"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using ARIS1.Data
+@using ARIS1.Services
+@using ARIS1.Services.Resources
+@attribute [Authorize(Roles = "Parent")]
+@rendermode InteractiveServer
+@inject AuthenticationStateProvider AuthStateProvider
+@inject SchoolAuthorizationService SchoolAuth
+@inject ResourceAccessService Access
+@inject AppDbContext DbContext
+
+@if (accessDenied)
+{
+    <div class="alert alert-danger">You do not have access to this learner's data.</div>
+}
+else if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <a href="/parent/dashboard">&larr; Back to my children</a>
+    <h2 class="mt-2">@childName</h2>
+    <p class="text-muted">Study materials shared by @childName's teachers.</p>
+    <ResourceBrowser Subjects="subjects" SelectedSubjectId="Subject"
+                     EmptyMessage="This learner isn't enrolled in any subjects this year." />
+}
+
+@code {
+    [Parameter] public int LearnerId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "subject")]
+    public int? Subject { get; set; }
+
+    private List<ResourceSubject>? subjects;
+    private string childName = string.Empty;
+    private bool accessDenied;
+    private int? loadedLearnerId;
+
+    // OnParametersSetAsync (not OnInitializedAsync) so a route change on a live component re-checks ownership,
+    // matching the other Parent per-child pages.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedLearnerId == LearnerId) return;
+
+        subjects = null;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!await SchoolAuth.HasAccessToLearner(authState.User.Identity?.Name, LearnerId))
+        {
+            accessDenied = true;
+            return;
+        }
+
+        accessDenied = false;
+        childName = await DbContext.Learners.Where(l => l.LearnerId == LearnerId).Select(l => l.User.Fullname).FirstOrDefaultAsync() ?? string.Empty;
+        subjects = await Access.GetViewableSubjectsAsync(authState.User, LearnerId);
+        loadedLearnerId = LearnerId;
+    }
+}

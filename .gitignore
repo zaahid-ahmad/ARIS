@@ -3,4 +3,6 @@ bin/
 obj/
 *.user
 *.suo
+# Uploaded learning-resource files (Resources:StoragePath default)
+App_Data/
 

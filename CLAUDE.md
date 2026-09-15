@@ -127,6 +127,12 @@ Four categories (`EmailCategories`): `Account` (Identity's `IEmailSender<User>` 
 
 **Gotcha:** a page that hosts a child component which also queries the scoped `AppDbContext` in `OnInitializedAsync` must not render that child until its own queries finish — both run concurrently during prerender and EF throws "A second operation was started on this context instance" (hit on `Admin/Messages.razor`; fixed with a `loaded` flag).
 
+### Learning Resources
+
+`LearningResource` (`Models/LearningResource.cs`, migration `AddLearningResources`) is a document or link attached to one `Subject` (school-scoped; types `Document`, `VideoLink`, `Link`; optional Term and Category; soft-deleted via `IsActive`). Uploaded documents are stored by `ResourceFileStore` **outside wwwroot** at `Resources:StoragePath` (default `App_Data/resources/{schoolId}/{guid}{ext}`, git-ignored), allow-listed Office/PDF/text types up to 20 MB — videos go in as links. They are only downloadable via `GET /resources/{id}/file` (`Components/Endpoints/ResourceEndpoints.cs`, `RequireAuthorization`), which returns 404 (never 403) unless `ResourceAccessService.CanViewAsync` passes. `ResourceAccessService` is the single source of access rules, all current-year scoped: Teacher manages own subjects; Learner views enrolled subjects; Parent views a linked child's subjects (`HasAccessToLearner`); Admin manages every school subject ("Resource Desk", can restore removed items). UI is one shared `Components/Shared/ResourceBrowser.razor` (subject cards with counts → `?subject={id}` detail, re-validated against the scoped list) hosted by `Teacher/Resources.razor`, `Learner/Resources.razor`, `Parent/Resources.razor` (`/parent/resources/{LearnerId}`) and `Admin/Resources.razor`; every save/remove re-checks `CanManageAsync`, URLs must be absolute http/https. Files are never physically deleted because `YearRolloverService.CloneSubjectCatalogAsync` copies active resources onto the new year's subjects sharing the same stored file.
+
+This deliberately does **not** touch `Intervention` — the auto-generated per-question interventions must never be repurposed for teacher recommendations, programs or approvals; any such feature needs its own entity.
+
 ### Database & Seeding
 
 `AppDbContext` extends `IdentityDbContext<User>`. On startup, `DbSeeder.SeedAsync()` creates the five roles, a `Default School`, and default accounts:

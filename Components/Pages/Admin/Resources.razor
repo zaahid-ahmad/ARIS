@@ -1,0 +1,31 @@
+@page "/admin/resources"
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Services.Resources
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ResourceAccessService Access
+
+@if (subjects == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <p class="text-muted">Every learning resource shared in your school this year. You can add, edit, remove and restore resources.</p>
+    <ResourceBrowser Subjects="subjects" SelectedSubjectId="Subject" CanManage="true" AllowRestore="true"
+                     EmptyMessage="Your school has no subjects this year." />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "subject")]
+    public int? Subject { get; set; }
+
+    private List<ResourceSubject>? subjects;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        subjects = await Access.GetViewableSubjectsAsync(authState.User);
+    }
+}

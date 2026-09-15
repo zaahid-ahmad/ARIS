@@ -2,7 +2,8 @@
 **Date:** 2026-08-05  
 **Analyst:** Claude Code (claude-sonnet-4-6)  
 **Scope:** All C# entities, configuration, services, and Razor pages/components  
-**Last updated:** 2026-09-14 (latest) — **Email added end-to-end** (previously Identity was wired to `NoOpEmailSender`, so nothing was ever sent): SMTP via MailKit behind a persisted queue (`EmailLog` + `EmailBackgroundService`), account emails (working Forgot Password with a restyled login-card flow, welcome/reset-link emails with set-password links), staff messages to parents (Admin + scoped Teacher composer), automatic parent risk alerts on Mark Entry "Done", term progress report emails, an Admin Email Log, and a parent opt-out. Migration `AddEmail`. See §5.10. Also fixed a pre-existing Mark Entry data-loss bug: clicking Done within 800ms of typing silently discarded the last edit (pending debounced saves were cancelled, not flushed).
+**Last updated:** 2026-09-15 (latest) — **Learning Resources** added (§5.11), reworked from a team member's `AddResources.md` spec after an audit found it would have broken existing features: it redefined `Intervention` (auto-generated per-question records used by Learner Support, the chatbot, Parent Overview, parent alerts and progress reports), declared `class Program` (clashes with `Program.cs`), shipped a hand-written SQLite migration with wrong table/key names and `int` user ids, had no school scoping or file access control (uploads under `wwwroot`), and wasn't year-scoped. Only the Resources part was implemented; Programs, program requests, teacher recommendations, consultations and approvals were intentionally left out. Also fixed `MainLayout.GetPageTitle` ignoring query strings.
+**Previously:** 2026-09-14 — **Email added end-to-end** (previously Identity was wired to `NoOpEmailSender`, so nothing was ever sent): SMTP via MailKit behind a persisted queue (`EmailLog` + `EmailBackgroundService`), account emails (working Forgot Password with a restyled login-card flow, welcome/reset-link emails with set-password links), staff messages to parents (Admin + scoped Teacher composer), automatic parent risk alerts on Mark Entry "Done", term progress report emails, an Admin Email Log, and a parent opt-out. Migration `AddEmail`. See §5.10. Also fixed a pre-existing Mark Entry data-loss bug: clicking Done within 800ms of typing silently discarded the last edit (pending debounced saves were cancelled, not flushed).
 **Previously:** 2026-09-14 — Demo-readiness fixes: `Learner/Support.razor`'s stats now match the rest of the app (weighted marks, current-year attendance/concerns, correct concern colours); `aris-styles.css` fingerprinted (issue #30 closed); `Learner/Dashboard.razor` interventions ordered by severity instead of alphabetically. Also: Year Rollover is currently blocked on the demo data (all subjects already `AcademicYear 2026` = calendar year) — see §5.8. Earlier the same day: the Learner chatbot was scoped to CAPS (see §6 `Learner/Support.razor`).
 **Previously:** 2026-09-14 — Replaced `GeminiChatAssistantService` (reported extremely slow, ~never returning a reply on the free tier) with a generic `OpenAiCompatibleChatAssistantService` defaulting to Groq's free tier; falls back to `RuleBasedChatAssistantService` on any failure, 20s timeout, failures now logged. Also fixed `Learner/Support.razor`'s Enter-key send reading a stale `userInput` and added a re-entrancy guard. See §6 `Learner/Support.razor`.
 **Previously:** 2026-09-09 (latest) — Added a risk-score badge to `Teacher/LearnerProfiles.razor`'s per-subject cards, next to the subject name (e.g. "Mathematics · Grade 10 · **50 · High**"). There was previously no way to see a learner's risk score without separately cross-referencing `Teacher/AtRisk.razor` by name. Reuses `RiskAssessmentService.CalculateRiskScore(learnerId, subjectId)` (`Services/RiskAssessmentService.cs:30`) as-is — no service/scoring changes — called once per subject inside `ViewProfile`'s existing per-subject Term/Year-mark loop (no new loop added). Badge background uses the same 4-color risk palette already established in `Teacher/AtRisk.razor`'s scatter chart and the `Teacher/Dashboard.razor` donuts (Critical `#d03b3b` / High `#ec835a` / Moderate `#fab219` / Low `#0ca30c`), duplicated locally as `RiskColor`/`RiskTextColor` helpers matching this codebase's convention for small per-page color helpers (e.g. `Learner/Dashboard.razor`'s duplicated `GetLevelColors`); Moderate's amber background uses dark text since white doesn't read well there, the other three use white — text (score + level, e.g. "50 · High") is shown regardless of color either way, consistent with the app's "never rely on hue alone" convention. Verified live against Riverside (teacher Suzanne Venter): all three color/text-contrast variants (Critical/High/Moderate) render legibly, and David Mahlangu's Life Sciences badge ("50 · High") matches `Teacher/AtRisk.razor`'s own table for the same learner/subject exactly (50.0%, High) — confirming both pages call the same underlying score with no drift.
@@ -429,6 +430,41 @@ Verified live end-to-end against Riverside's seeded data: Riaan Van Wyk (Mathema
   - The setting was restored.
 
 **Not live-verified:** Create User / SuperAdmin / bulk-import welcome emails (would create permanent demo accounts) — same `AccountEmailService` token/link/queue path as the verified reset-link email, with a different template.
+
+### 5.11 Learning Resources (`Services/Resources/`) — ✅ *2026-09-15*
+
+**Entity.** `LearningResource` (migration `AddLearningResources`): `SchoolId`, `SubjectId`, `Title`, `Description`, `Type` (`Document` / `VideoLink` / `Link`), `Category`, `Term` (null = all year), file metadata (`StoredFileName`, `OriginalFileName`, `ContentType`, `FileSizeBytes`), `ExternalUrl`, `UploadedByUserId`, `IsActive`, `CreatedUtc`/`UpdatedUtc`. All FKs Restrict; index `(SubjectId, IsActive)`. The migration only creates the new table.
+
+**Storage and download.** `ResourceFileStore` (singleton) saves allow-listed documents (`.pdf .doc(x) .ppt(x) .xls(x) .txt`, ≤ 20 MB) outside wwwroot under random GUID names, with a regex plus full-path check guarding against traversal. `GET /resources/{id}/file` (`ResourceEndpoints`, authenticated) returns 404 for anything the caller can't view, sets `nosniff`, shows PDFs inline and downloads other types.
+
+**Access.** `ResourceAccessService` — current-year subjects only:
+- Teacher: own subjects, can manage.
+- Learner: enrolled subjects, view only.
+- Parent: a linked child's subjects via `HasAccessToLearner`, view only.
+- Admin: whole school, can manage and restore.
+URLs are limited to absolute http/https.
+
+**UI.** Shared `ResourceBrowser` component: subject cards with counts from one grouped query → `?subject=` detail, re-validated server-side, with search, term filter and add/edit modal (type first, then file or URL; Grade 12 terms 1–3). Soft-delete Remove plus admin Restore; `isSaving` guard. Hosted by:
+- `Teacher/Resources.razor`, `Learner/Resources.razor`, `Admin/Resources.razor` ("Resource Desk")
+- `Parent/Resources.razor` (plus a Resources button on the Parent Dashboard)
+Nav links and page titles added.
+
+**Year Rollover.** Active resources are copied onto the cloned subjects, sharing the stored file. Files are therefore never physically deleted.
+
+**Verified live** against Riverside (baseline counts of Interventions 8828 / Subjects 33 / Users 495 / LearnerSubjects 1769 unchanged afterwards):
+- *Teacher Daniel Robinson:*
+  - saw exactly his 3 Physical Science subjects;
+  - a foreign `?subject=1` showed "Subject not found";
+  - a `.exe` was rejected;
+  - a PDF was stored under `App_Data/resources/3/<guid>.pdf` and downloaded as `application/pdf` with `nosniff`;
+  - `javascript:alert(1)` was rejected, and a YouTube link was saved and edited.
+- *Download without permission:* signed out → 302 to login; a non-enrolled Grade 11 learner had no PS10 card, got 404 on the download (same as a nonexistent id), and "Subject not found" via URL.
+- *Enrolled learner Andile Venter:* both resources shown read-only, and the PDF downloaded.
+- *His parent:* same via the new dashboard button; another family's child → access denied.
+- *Admin:* all 30 subjects; Remove showed a "Removed" badge and Restore reactivated it.
+- *Cleanup:* test rows and file deleted afterwards.
+
+**Not live-tested:** a removed resource being hidden from learners (enforced by the `IsActive` filter in the list query and `CanViewAsync`); the rollover copy (rollover is irreversible and blocked on demo data).
 
 ## 6. Components & Pages
 

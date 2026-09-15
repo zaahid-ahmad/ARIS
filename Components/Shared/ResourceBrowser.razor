@@ -1,0 +1,554 @@
+@using ARIS1.Data
+@using ARIS1.Models
+@using ARIS1.Services.Resources
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext DbContext
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@inject ResourceAccessService Access
+@inject ResourceFileStore FileStore
+
+@* Two-level learning-resource browser shared by the Teacher, Learner, Parent and Admin pages:
+   Level 1 = subject cards with resource counts, Level 2 = one subject's resources (?subject={id}).
+   Subjects come from ResourceAccessService (already role/year scoped); the selected id and every
+   write are re-validated server-side. *@
+
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <div class="alert alert-success alert-dismissible">
+        @statusMessage
+        <button type="button" class="btn-close" @onclick="() => statusMessage = null"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger alert-dismissible">
+        @errorMessage
+        <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+    </div>
+}
+
+@if (SelectedSubjectId == null)
+{
+    @if (Subjects.Count == 0)
+    {
+        <p class="text-muted">@EmptyMessage</p>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var subject in Subjects)
+            {
+                var count = counts.GetValueOrDefault(subject.SubjectId);
+                <div class="col-sm-6 col-lg-4 col-xl-3">
+                    <div class="card h-100" role="button" style="cursor:pointer" @onclick="() => SelectSubject(subject.SubjectId)">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <i class="fas fa-folder-open text-primary fs-4"></i>
+                                <h5 class="card-title mb-0">@subject.Name</h5>
+                            </div>
+                            <div class="text-muted small mb-2">Grade @subject.Grade</div>
+                            <span class="badge @(count > 0 ? "bg-primary" : "bg-light text-dark border")">@count resource@(count == 1 ? "" : "s")</span>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+else if (selectedSubject == null)
+{
+    <button class="btn btn-secondary mb-3" @onclick="BackToSubjects">&larr; All subjects</button>
+    <div class="alert alert-warning">Subject not found.</div>
+}
+else
+{
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <button class="btn btn-secondary" @onclick="BackToSubjects">&larr; All subjects</button>
+        <h4 class="mb-0 ms-2">@selectedSubject.Name <span class="badge bg-light text-dark border">Grade @selectedSubject.Grade</span></h4>
+        @if (CanManage)
+        {
+            <button class="btn btn-primary ms-auto" @onclick="OpenAddModal"><i class="fas fa-plus"></i> Add resource</button>
+        }
+    </div>
+
+    <div class="row g-2 mb-3">
+        <div class="col-md-6">
+            <input class="form-control" placeholder="Search title, description or category…" @bind="searchTerm" @bind:event="oninput" />
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" @bind="termFilter">
+                <option value="">All terms</option>
+                @foreach (var t in AvailableTerms)
+                {
+                    <option value="@t">Term @t</option>
+                }
+                <option value="year">All-year only</option>
+            </select>
+        </div>
+    </div>
+
+    @if (resources == null)
+    {
+        <p>Loading...</p>
+    }
+    else if (!FilteredResources.Any())
+    {
+        <p class="text-muted">@(resources.Count == 0 ? "No resources have been added for this subject yet." : "No resources match your search.")</p>
+    }
+    else
+    {
+        <div class="list-group">
+            @foreach (var r in FilteredResources)
+            {
+                <div class="list-group-item @(r.IsActive ? "" : "bg-light")">
+                    <div class="d-flex flex-wrap gap-2 align-items-start">
+                        <div class="flex-grow-1" style="min-width:240px">
+                            <div class="fw-semibold">
+                                <i class="fas @IconFor(r.Type) me-1 text-secondary"></i> @r.Title
+                                @if (!r.IsActive)
+                                {
+                                    <span class="badge bg-secondary ms-1">Removed</span>
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(r.Description))
+                            {
+                                <div class="text-muted small mt-1">@r.Description</div>
+                            }
+                            <div class="mt-1">
+                                <span class="badge bg-light text-dark border">@LearningResourceTypes.Label(r.Type)</span>
+                                <span class="badge bg-light text-dark border">@(r.Term.HasValue ? $"Term {r.Term}" : "All year")</span>
+                                @if (!string.IsNullOrWhiteSpace(r.Category))
+                                {
+                                    <span class="badge bg-light text-dark border">@r.Category</span>
+                                }
+                                @if (r.Type == LearningResourceTypes.Document && r.FileSizeBytes.HasValue)
+                                {
+                                    <span class="text-muted small ms-1">@r.OriginalFileName · @FormatSize(r.FileSizeBytes.Value)</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-1">
+                            @if (r.Type == LearningResourceTypes.Document)
+                            {
+                                <a class="btn btn-sm btn-outline-primary" href="@($"/resources/{r.LearningResourceId}/file")" target="_blank" rel="noopener noreferrer">
+                                    <i class="fas fa-download"></i> Open
+                                </a>
+                            }
+                            else if (!string.IsNullOrEmpty(r.ExternalUrl))
+                            {
+                                <a class="btn btn-sm btn-outline-primary" href="@r.ExternalUrl" target="_blank" rel="noopener noreferrer">
+                                    <i class="fas fa-arrow-up-right-from-square"></i> Open link
+                                </a>
+                            }
+                            @if (CanManage && r.IsActive)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenEditModal(r)" disabled="@isSaving">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => resourceToRemove = r" disabled="@isSaving">Remove</button>
+                            }
+                            @if (CanManage && AllowRestore && !r.IsActive)
+                            {
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => SetActiveAsync(r.LearningResourceId, true)" disabled="@isSaving">Restore</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@if (resourceToRemove != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Remove resource</h5></div>
+                <div class="modal-body">
+                    <p>Remove <strong>@resourceToRemove.Title</strong>? Learners and parents will no longer see it.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => resourceToRemove = null">Cancel</button>
+                    <button class="btn btn-danger" disabled="@isSaving" @onclick="() => SetActiveAsync(resourceToRemove.LearningResourceId, false)">Remove</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showModal && selectedSubject != null)
+{
+    <div class="modal d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editingId == null ? "Add resource" : "Edit resource") — @selectedSubject.Name (Grade @selectedSubject.Grade)</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal" disabled="@isSaving"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger">@modalError</div>
+                    }
+
+                    <label class="form-label">Resource type <span class="text-danger">*</span></label>
+                    <select class="form-select mb-3" @bind="formType" @bind:after="OnTypeChanged">
+                        <option value="@LearningResourceTypes.Document">Document (upload a file)</option>
+                        <option value="@LearningResourceTypes.VideoLink">Video (link, e.g. YouTube)</option>
+                        <option value="@LearningResourceTypes.Link">Web link</option>
+                    </select>
+
+                    @if (formType == LearningResourceTypes.Document)
+                    {
+                        <label class="form-label">File @(editingId == null || existingFileName == null ? "*" : "(optional: choose a new file to replace it)")</label>
+                        <InputFile class="form-control mb-1" OnChange="OnFileSelected" accept="@ResourceFileStore.AcceptAttribute" disabled="@isSaving" />
+                        <small class="text-muted d-block mb-3">
+                            @if (selectedFile != null)
+                            {
+                                <span>Selected: @selectedFile.Name (@FormatSize(selectedFile.Size))</span>
+                            }
+                            else if (existingFileName != null)
+                            {
+                                <span>Current file: @existingFileName</span>
+                            }
+                            else
+                            {
+                                <span>PDF, Word, PowerPoint, Excel or text, up to @(ResourceFileStore.MaxFileBytes / (1024 * 1024)) MB. Add videos as a link.</span>
+                            }
+                        </small>
+                    }
+                    else
+                    {
+                        <label class="form-label">URL <span class="text-danger">*</span></label>
+                        <input class="form-control mb-3" type="url" maxlength="2000" placeholder="https://…" @bind="formUrl" />
+                    }
+
+                    <label class="form-label">Title <span class="text-danger">*</span></label>
+                    <input class="form-control mb-3" maxlength="200" @bind="formTitle" />
+
+                    <label class="form-label">Description</label>
+                    <textarea class="form-control mb-3" rows="3" maxlength="1000" @bind="formDescription"></textarea>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Term</label>
+                            <select class="form-select" @bind="formTerm">
+                                <option value="">All year</option>
+                                @foreach (var t in AvailableTerms)
+                                {
+                                    <option value="@t">Term @t</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Category</label>
+                            <input class="form-control" maxlength="100" list="resourceCategories" placeholder="e.g. Past papers, Revision notes" @bind="formCategory" />
+                            <datalist id="resourceCategories">
+                                @foreach (var c in ExistingCategories)
+                                {
+                                    <option value="@c"></option>
+                                }
+                            </datalist>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal" disabled="@isSaving">Cancel</button>
+                    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@isSaving">@(isSaving ? "Saving…" : "Save")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ResourceSubject> Subjects { get; set; } = Array.Empty<ResourceSubject>();
+    [Parameter] public int? SelectedSubjectId { get; set; }
+    [Parameter] public bool CanManage { get; set; }
+    [Parameter] public bool AllowRestore { get; set; }
+    [Parameter] public string EmptyMessage { get; set; } = "There are no subjects to show.";
+
+    private Dictionary<int, int> counts = new();
+    private ResourceSubject? selectedSubject;
+    private List<LearningResource>? resources;
+    private int? loadedSubjectId;
+
+    private string searchTerm = string.Empty;
+    private string termFilter = string.Empty;
+    private string? statusMessage;
+    private string? errorMessage;
+
+    private bool showModal;
+    private int? editingId;
+    private string formType = LearningResourceTypes.Document;
+    private string formTitle = string.Empty;
+    private string formDescription = string.Empty;
+    private string formCategory = string.Empty;
+    private string formTerm = string.Empty;
+    private string formUrl = string.Empty;
+    private IBrowserFile? selectedFile;
+    private string? existingFileName;
+    private string? modalError;
+    private bool isSaving;
+    private LearningResource? resourceToRemove;
+
+    private IEnumerable<int> AvailableTerms => selectedSubject?.Grade == 12 ? new[] { 1, 2, 3 } : new[] { 1, 2, 3, 4 };
+
+    private IEnumerable<string> ExistingCategories => (resources ?? new())
+        .Where(r => !string.IsNullOrWhiteSpace(r.Category))
+        .Select(r => r.Category!)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(c => c);
+
+    private IEnumerable<LearningResource> FilteredResources => (resources ?? new())
+        .Where(r => string.IsNullOrWhiteSpace(searchTerm)
+                    || r.Title.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)
+                    || (r.Description?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (r.Category?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false))
+        .Where(r => termFilter == string.Empty
+                    || (termFilter == "year" ? r.Term == null : r.Term?.ToString() == termFilter));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (SelectedSubjectId == null)
+        {
+            selectedSubject = null;
+            resources = null;
+            loadedSubjectId = null;
+            await LoadCountsAsync();
+            return;
+        }
+
+        // Route/query-supplied id: only accept subjects from the already-scoped list.
+        selectedSubject = Subjects.FirstOrDefault(s => s.SubjectId == SelectedSubjectId);
+        if (selectedSubject != null && loadedSubjectId != selectedSubject.SubjectId)
+        {
+            searchTerm = string.Empty;
+            termFilter = string.Empty;
+            await LoadResourcesAsync();
+        }
+    }
+
+    private async Task LoadCountsAsync()
+    {
+        var ids = Subjects.Select(s => s.SubjectId).ToList();
+        counts = await DbContext.LearningResources.AsNoTracking()
+            .Where(r => ids.Contains(r.SubjectId) && r.IsActive)
+            .GroupBy(r => r.SubjectId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count);
+    }
+
+    private async Task LoadResourcesAsync()
+    {
+        if (selectedSubject == null) return;
+        var includeRemoved = CanManage && AllowRestore;
+        resources = await DbContext.LearningResources.AsNoTracking()
+            .Where(r => r.SubjectId == selectedSubject.SubjectId && (r.IsActive || includeRemoved))
+            .OrderByDescending(r => r.IsActive).ThenBy(r => r.Term == null).ThenBy(r => r.Term).ThenByDescending(r => r.CreatedUtc)
+            .ToListAsync();
+        loadedSubjectId = selectedSubject.SubjectId;
+    }
+
+    private void SelectSubject(int subjectId)
+    {
+        statusMessage = errorMessage = null;
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("subject", (int?)subjectId));
+    }
+
+    private void BackToSubjects()
+    {
+        statusMessage = errorMessage = null;
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("subject", (int?)null));
+    }
+
+    private void OpenAddModal()
+    {
+        editingId = null;
+        formType = LearningResourceTypes.Document;
+        formTitle = formDescription = formCategory = formTerm = formUrl = string.Empty;
+        selectedFile = null;
+        existingFileName = null;
+        modalError = null;
+        showModal = true;
+    }
+
+    private void OpenEditModal(LearningResource r)
+    {
+        editingId = r.LearningResourceId;
+        formType = r.Type;
+        formTitle = r.Title;
+        formDescription = r.Description ?? string.Empty;
+        formCategory = r.Category ?? string.Empty;
+        formTerm = r.Term?.ToString() ?? string.Empty;
+        formUrl = r.ExternalUrl ?? string.Empty;
+        selectedFile = null;
+        existingFileName = r.Type == LearningResourceTypes.Document ? r.OriginalFileName : null;
+        modalError = null;
+        showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        if (isSaving) return;
+        showModal = false;
+        selectedFile = null;
+    }
+
+    private void OnTypeChanged()
+    {
+        modalError = null;
+        if (formType == LearningResourceTypes.Document) formUrl = string.Empty;
+        else selectedFile = null;
+    }
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        modalError = ResourceFileStore.Validate(e.File);
+        selectedFile = modalError == null ? e.File : null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (isSaving || selectedSubject == null) return;
+        modalError = null;
+
+        if (!LearningResourceTypes.All.Contains(formType)) { modalError = "Choose a resource type."; return; }
+        if (string.IsNullOrWhiteSpace(formTitle)) { modalError = "Enter a title."; return; }
+        int? term = null;
+        if (!string.IsNullOrEmpty(formTerm))
+        {
+            if (!int.TryParse(formTerm, out var t) || !AvailableTerms.Contains(t)) { modalError = "Choose a valid term."; return; }
+            term = t;
+        }
+        var normalisedUrl = string.Empty;
+        if (formType != LearningResourceTypes.Document && !ResourceAccessService.TryNormaliseUrl(formUrl, out normalisedUrl))
+        {
+            modalError = "Enter a full web address starting with http:// or https://.";
+            return;
+        }
+
+        isSaving = true;
+        StoredResourceFile? newFile = null;
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            if (!await Access.CanManageAsync(authState.User, selectedSubject.SubjectId))
+            {
+                modalError = "You can't manage resources for this subject.";
+                return;
+            }
+
+            LearningResource entity;
+            if (editingId == null)
+            {
+                entity = new LearningResource
+                {
+                    SchoolId = selectedSubject.SchoolId,
+                    SubjectId = selectedSubject.SubjectId,
+                    UploadedByUserId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty,
+                    CreatedUtc = DateTime.UtcNow
+                };
+                if (string.IsNullOrEmpty(entity.UploadedByUserId)) { modalError = "Could not identify your account."; return; }
+                DbContext.LearningResources.Add(entity);
+            }
+            else
+            {
+                // Re-fetch and confirm it belongs to the subject being managed (never trust the closure-bound id alone).
+                var existing = await DbContext.LearningResources
+                    .FirstOrDefaultAsync(r => r.LearningResourceId == editingId && r.SubjectId == selectedSubject.SubjectId && r.IsActive);
+                if (existing == null) { modalError = "That resource no longer exists."; return; }
+                entity = existing;
+            }
+
+            if (formType == LearningResourceTypes.Document)
+            {
+                var hasExistingFile = entity.Type == LearningResourceTypes.Document && entity.StoredFileName != null;
+                if (selectedFile == null && !hasExistingFile) { modalError = "Choose a file to upload."; return; }
+                if (selectedFile != null)
+                {
+                    newFile = await FileStore.SaveAsync(selectedFile, selectedSubject.SchoolId);
+                    entity.StoredFileName = newFile.StoredFileName;
+                    entity.OriginalFileName = newFile.OriginalFileName;
+                    entity.ContentType = newFile.ContentType;
+                    entity.FileSizeBytes = newFile.SizeBytes;
+                }
+                entity.ExternalUrl = null;
+            }
+            else
+            {
+                // The old file stays on disk (it may be shared with a rolled-over copy); only the link is kept here.
+                entity.ExternalUrl = normalisedUrl;
+                entity.StoredFileName = null;
+                entity.OriginalFileName = null;
+                entity.ContentType = null;
+                entity.FileSizeBytes = null;
+            }
+
+            entity.Type = formType;
+            entity.Title = formTitle.Trim();
+            entity.Description = string.IsNullOrWhiteSpace(formDescription) ? null : formDescription.Trim();
+            entity.Category = string.IsNullOrWhiteSpace(formCategory) ? null : formCategory.Trim();
+            entity.Term = term;
+            entity.UpdatedUtc = DateTime.UtcNow;
+
+            await DbContext.SaveChangesAsync();
+            newFile = null; // committed; don't clean up
+
+            statusMessage = editingId == null ? $"\"{entity.Title}\" added." : $"\"{entity.Title}\" updated.";
+            showModal = false;
+            selectedFile = null;
+            await LoadResourcesAsync();
+        }
+        catch (Exception ex)
+        {
+            modalError = $"Could not save the resource: {ex.Message}";
+            DbContext.ChangeTracker.Clear();
+        }
+        finally
+        {
+            if (newFile != null) FileStore.TryDelete(selectedSubject.SchoolId, newFile.StoredFileName);
+            isSaving = false;
+        }
+    }
+
+    private async Task SetActiveAsync(int resourceId, bool active)
+    {
+        if (isSaving || selectedSubject == null) return;
+        isSaving = true;
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            if (!await Access.CanManageAsync(authState.User, selectedSubject.SubjectId) || (active && !AllowRestore))
+            {
+                errorMessage = "You can't manage resources for this subject.";
+                return;
+            }
+
+            var entity = await DbContext.LearningResources
+                .FirstOrDefaultAsync(r => r.LearningResourceId == resourceId && r.SubjectId == selectedSubject.SubjectId);
+            if (entity == null) { errorMessage = "That resource no longer exists."; return; }
+
+            entity.IsActive = active;
+            entity.UpdatedUtc = DateTime.UtcNow;
+            await DbContext.SaveChangesAsync();
+            statusMessage = active ? $"\"{entity.Title}\" restored." : $"\"{entity.Title}\" removed.";
+            await LoadResourcesAsync();
+        }
+        finally
+        {
+            resourceToRemove = null;
+            isSaving = false;
+        }
+    }
+
+    private static string IconFor(string type) => type switch
+    {
+        LearningResourceTypes.Document => "fa-file-lines",
+        LearningResourceTypes.VideoLink => "fa-circle-play",
+        _ => "fa-link"
+    };
+
+    private static string FormatSize(long bytes) =>
+        bytes >= 1024 * 1024 ? $"{bytes / (1024d * 1024):0.#} MB" : $"{Math.Max(1, bytes / 1024)} KB";
+}

@@ -189,7 +189,8 @@
 
     private string GetPageTitle()
     {
-        var path = (currentUrl ?? "").Trim('/').ToLowerInvariant();
+        // Ignore query strings/fragments (e.g. /teacher/resources?subject=12) when matching the page title.
+        var path = (currentUrl ?? "").Split('?', '#')[0].Trim('/').ToLowerInvariant();
         return path switch
         {
             "" => "Home",
@@ -205,6 +206,10 @@
             "admin/messages" => "Parent Communication",
             "admin/email-log" => "Email Log",
             "teacher/messages" => "Message Parents",
+            "teacher/resources" => "Resources",
+            "learner/resources" => "Resources",
+            "admin/resources" => "Resource Desk",
+            var p when p.StartsWith("parent/resources/") => "Resources",
             "teacher/dashboard" => "Dashboard",
             "teacher/marks" => "Mark Entry",
             "teacher/atrisk" => "Risk & Interventions",

@@ -1,0 +1,32 @@
+@page "/teacher/resources"
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Services.Resources
+@attribute [Authorize(Roles = "Teacher")]
+@rendermode InteractiveServer
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ResourceAccessService Access
+
+@if (subjects == null)
+{
+    @* Browser renders only after this page's own query, so they never share the scoped DbContext concurrently. *@
+    <p>Loading...</p>
+}
+else
+{
+    <p class="text-muted">Share documents and links with the learners (and their parents) in your subjects.</p>
+    <ResourceBrowser Subjects="subjects" SelectedSubjectId="Subject" CanManage="true"
+                     EmptyMessage="You don't have any subjects this year." />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "subject")]
+    public int? Subject { get; set; }
+
+    private List<ResourceSubject>? subjects;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        subjects = await Access.GetViewableSubjectsAsync(authState.User);
+    }
+}
