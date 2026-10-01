@@ -8,6 +8,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @rendermode InteractiveServer
 @inject AppDbContext DbContext
+@inject ARIS1.Services.RiskOverviewService RiskCache
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager Navigation
@@ -323,6 +324,7 @@
             DbContext.LearnerSubjects.Add(enrollment);
             await DbContext.SaveChangesAsync();
 
+            RiskCache.InvalidateSubject(selectedSubjectId); // admin views cache risk per subject
             successMessage = $"{learner.User?.Fullname} enrolled successfully!";
             await LoadEnrollments();
         }
@@ -363,6 +365,7 @@
             {
                 DbContext.LearnerSubjects.Remove(enrollment);
                 await DbContext.SaveChangesAsync();
+                RiskCache.InvalidateSubject(selectedSubjectId); // admin views cache risk per subject
                 successMessage = $"{learner.User?.Fullname} removed successfully!";
                 await LoadEnrollments();
             }

@@ -1,0 +1,65 @@
+@implements IDisposable
+
+@* Shows that something is working: spinner, message, optional "n of N" bar, and seconds elapsed since it appeared.
+   Render it only while the work is running (wrap in @if); it keeps its own 1s timer so the page isn't re-rendered for the clock. *@
+
+@if (Compact)
+{
+    <div class="d-flex align-items-center gap-2 text-muted mb-3" role="status" aria-live="polite">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>@Message@(Elapsed >= 2 ? $" ({Elapsed}s)" : "")</span>
+    </div>
+}
+else
+{
+    <div class="card mb-3" role="status" aria-live="polite">
+        <div class="card-body">
+            <div class="d-flex align-items-center gap-2">
+                <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span>
+                <strong>@Message</strong>
+                <span class="ms-auto text-muted">@Elapsed s</span>
+            </div>
+            @if (Total > 0)
+            {
+                var pct = Math.Clamp(Done * 100 / Total, 0, 100);
+                <div class="progress mt-2" style="height: 8px;">
+                    <div class="progress-bar" role="progressbar" style="width: @pct%;" aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <small class="text-muted">@Done of @Total@(string.IsNullOrEmpty(Detail) ? "" : $" - {Detail}")</small>
+            }
+            else
+            {
+                <div class="progress mt-2" style="height: 8px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%;"></div>
+                </div>
+                @if (!string.IsNullOrEmpty(Detail))
+                {
+                    <small class="text-muted">@Detail</small>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Message { get; set; } = "Working...";
+    [Parameter] public string? Detail { get; set; }
+    [Parameter] public int Done { get; set; }
+    [Parameter] public int Total { get; set; }
+    [Parameter] public bool Compact { get; set; }
+
+    private readonly DateTime started = DateTime.UtcNow;
+    private Timer? timer;
+    private int Elapsed => (int)(DateTime.UtcNow - started).TotalSeconds;
+
+    protected override void OnInitialized()
+    {
+        timer = new Timer(_ =>
+        {
+            try { _ = InvokeAsync(StateHasChanged); }
+            catch (ObjectDisposedException) { }
+        }, null, 1000, 1000);
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

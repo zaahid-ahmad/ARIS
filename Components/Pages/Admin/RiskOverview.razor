@@ -3,6 +3,7 @@
 @using ARIS1.Models
 @using ARIS1.Services
 @attribute [Authorize(Roles = "Admin")]
+@implements IDisposable
 @rendermode InteractiveServer
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
@@ -16,14 +17,16 @@
 
 @if (isLoading)
 {
-    <p>Calculating risk across the school...</p>
+    <ProgressPanel Message="Calculating risk across the school..." Done="progressDone" Total="progressTotal" Detail="@progressCurrent" />
 }
 else if (overview != null)
 {
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
         <div>
             <h5 class="mb-0">@overview.SchoolName</h5>
-            <small class="text-muted">Academic year @overview.AcademicYear. Learners are counted once, by their highest-risk subject.</small>
+            <small class="text-muted d-block">Academic year @overview.AcademicYear. Learners are counted once, by their highest-risk subject.</small>
+            <small class="text-muted">Data as of @overview.AsOfUtc.ToLocalTime().ToString("HH:mm")@(overview.SubjectsFromCache > 0 && overview.SubjectsComputed == 0 ? " (saved from earlier)" : "") -
+                <button class="btn btn-link btn-sm p-0 align-baseline" @onclick="Refresh">Refresh</button></small>
         </div>
         <button class="btn btn-primary" @onclick="CreateReport">
             <i class="fas fa-file-pdf"></i> Create report (PDF)
@@ -124,7 +127,15 @@ else if (overview != null)
     private SchoolRiskOverview? overview;
     private int? selectedGrade;
     private bool isLoading = true;
+    private bool started;
+    private int? schoolId;
     private string errorMessage = string.Empty;
+    private readonly CancellationTokenSource cts = new();
+
+    // Live progress of the calculation (fed by RiskOverviewService, re-rendered at most ~7x/second).
+    private int progressDone;
+    private int progressTotal;
+    private string? progressCurrent;
 
     private List<SubjectRiskSummary> visibleSubjects =>
         overview == null ? new() : overview.Subjects.Where(s => selectedGrade == null || s.Grade == selectedGrade).ToList();
@@ -138,19 +149,62 @@ else if (overview != null)
             if (admin?.SchoolId == null)
             {
                 errorMessage = "You are not assigned to a school.";
+                isLoading = false;
                 return;
             }
+            schoolId = admin.SchoolId;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+            isLoading = false;
+        }
+    }
 
-            overview = await RiskOverviewSvc.BuildAsync(admin.SchoolId.Value);
+    // The page shell paints first; the (cached, parallel) calculation runs on the live circuit only, once.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || schoolId == null) return;
+        started = true;
+        await LoadAsync(refresh: false);
+    }
+
+    private async Task Refresh()
+    {
+        if (isLoading || schoolId == null) return;
+        await LoadAsync(refresh: true);
+    }
+
+    private async Task LoadAsync(bool refresh)
+    {
+        isLoading = true;
+        progressDone = 0;
+        progressTotal = 0;
+        progressCurrent = null;
+        errorMessage = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            if (refresh) RiskOverviewSvc.InvalidateSchool(schoolId!.Value);
+
+            var progress = new ThrottledProgress<RiskBuildProgress>(
+                p => { progressDone = p.Done; progressTotal = p.Total; progressCurrent = p.Current; },
+                () => _ = InvokeAsync(StateHasChanged));
+
+            overview = await RiskOverviewSvc.BuildAsync(schoolId!.Value, progress: progress, ct: cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // left the page
         }
         catch (Exception ex)
         {
             errorMessage = $"Error: {ex.Message}";
         }
-        finally
-        {
-            isLoading = false;
-        }
+
+        isLoading = false;
+        StateHasChanged();
     }
 
     private void SelectGrade(int? grade)
@@ -163,4 +217,6 @@ else if (overview != null)
     {
         Navigation.NavigateTo(selectedGrade == null ? "/admin/risk-report" : $"/admin/risk-report?grade={selectedGrade}");
     }
+
+    public void Dispose() => cts.Cancel();
 }

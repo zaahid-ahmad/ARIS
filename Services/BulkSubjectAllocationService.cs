@@ -18,10 +18,12 @@ namespace ARIS1.Services
     public class BulkSubjectAllocationService
     {
         private readonly AppDbContext _dbContext;
+        private readonly RiskOverviewService _riskOverview;
 
-        public BulkSubjectAllocationService(AppDbContext dbContext)
+        public BulkSubjectAllocationService(AppDbContext dbContext, RiskOverviewService riskOverview)
         {
             _dbContext = dbContext;
+            _riskOverview = riskOverview;
         }
 
         public async Task<List<string>> GetClassNamesAsync(int schoolId, int grade)
@@ -87,6 +89,8 @@ namespace ARIS1.Services
             _dbContext.LearnerSubjects.AddRange(toInsert);
             await _dbContext.SaveChangesAsync();
             await transaction.CommitAsync();
+
+            foreach (var subject in subjects) _riskOverview.InvalidateSubject(subject.SubjectId); // admin views cache risk per subject
 
             return new ClassAllocationResult(toInsert.Count, existingPairs.Count);
         }

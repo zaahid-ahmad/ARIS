@@ -8,6 +8,7 @@
 @attribute [Authorize(Roles = "Teacher")]
 @rendermode InteractiveServer
 @inject AppDbContext DbContext
+@inject ARIS1.Services.RiskOverviewService RiskCache
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 
@@ -420,6 +421,7 @@
             }
 
             await transaction.CommitAsync();
+            RiskCache.InvalidateSubject(selectedSubjectId); // admin views cache risk per subject
             successMessage = existingSession != null
                 ? "Attendance updated successfully!"
                 : "Attendance saved successfully!";

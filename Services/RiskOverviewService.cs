@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
 using ARIS1.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Primitives;
 
 namespace ARIS1.Services
 {
@@ -59,6 +62,16 @@ namespace ARIS1.Services
         public Dictionary<int, RiskData> Risks { get; set; } = new();
         // Only filled when BuildAsync is asked for names (the PDF's optional appendix).
         public Dictionary<int, LearnerLabel> Learners { get; set; } = new();
+        // When this subject's scores were calculated. Cached summaries keep their original time, so pages can say "Data as of".
+        public DateTime ComputedAtUtc { get; set; }
+
+        // Cached summaries are shared between requests and must never be mutated, so names go on a copy.
+        public SubjectRiskSummary WithLearners(Dictionary<int, LearnerLabel> labels)
+        {
+            var copy = (SubjectRiskSummary)MemberwiseClone();
+            copy.Learners = labels;
+            return copy;
+        }
 
         public int Count(string level) => Counts.TryGetValue(level, out var c) ? c : 0;
         public int AtRisk => Risks.Values.Count(r => r.Score >= RiskAssessmentService.AtRiskThreshold);
@@ -76,39 +89,83 @@ namespace ARIS1.Services
         public string SchoolCode { get; set; } = string.Empty;
         public int AcademicYear { get; set; }
         public List<SubjectRiskSummary> Subjects { get; set; } = new();
+        // Oldest calculation time among the subjects: the honest "Data as of" for the whole view.
+        public DateTime AsOfUtc { get; set; } = DateTime.UtcNow;
+        public int SubjectsFromCache { get; set; }
+        public int SubjectsComputed { get; set; }
 
         public RiskAggregate Total => RiskOverviewService.Aggregate(Subjects);
         public RiskAggregate ForGrade(int grade) => RiskOverviewService.Aggregate(Subjects.Where(s => s.Grade == grade));
         public List<int> Grades => Subjects.Select(s => s.Grade).Distinct().OrderBy(g => g).ToList();
     }
 
-    // The single risk walk behind the Teacher Dashboard, the Admin Risk Overview and the PDF report. Always the
-    // batched RiskAssessmentService call, once per subject — never per learner.
+    // Progress of a BuildAsync call: how many subjects are finished, out of how many.
+    public record RiskBuildProgress(int Done, int Total, string? Current);
+
+    // The single risk walk behind the Teacher Dashboard, the Admin Dashboard banner, the Admin Risk Overview and the
+    // PDF report. Always the batched RiskAssessmentService call, once per subject — never per learner.
+    //
+    // Speed: each subject's result is cached (default 10 min, Risk:CacheMinutes) so the dashboard, overview and
+    // report share one calculation, and subjects that are not cached are calculated in parallel, each worker in its
+    // own scope (its own AppDbContext — one context cannot run concurrent queries). Cached summaries are shared
+    // between requests and are never mutated. The cache is cleared per subject/school when marks, attendance or
+    // enrolments change (InvalidateSubject/InvalidateSchool); the time limit is only a safety net.
     public class RiskOverviewService
     {
         private readonly AppDbContext _db;
-        private readonly RiskAssessmentService _risk;
+        private readonly IMemoryCache _cache;
+        private readonly IServiceScopeFactory _scopes;
+        private readonly ILogger<RiskOverviewService> _log;
+        private readonly TimeSpan _cacheDuration;
+        private readonly int _maxParallelism;
 
-        public RiskOverviewService(AppDbContext db, RiskAssessmentService risk)
+        // One token per school: cancelling it evicts every cached subject of that school at once.
+        private static readonly ConcurrentDictionary<int, CancellationTokenSource> SchoolTokens = new();
+        private static readonly object CreateLock = new();
+        private static long _subjectComputations;
+
+        // Diagnostics (and tests): how many subject calculations have actually run in this process.
+        public static long SubjectComputations => Interlocked.Read(ref _subjectComputations);
+
+        public RiskOverviewService(AppDbContext db, IMemoryCache cache, IServiceScopeFactory scopes,
+            IConfiguration config, ILogger<RiskOverviewService> log)
         {
             _db = db;
-            _risk = risk;
+            _cache = cache;
+            _scopes = scopes;
+            _log = log;
+            _cacheDuration = TimeSpan.FromMinutes(Math.Max(0.01, config.GetValue("Risk:CacheMinutes", 10.0)));
+            _maxParallelism = Math.Max(1, config.GetValue("Risk:MaxParallelism", Math.Min(4, Environment.ProcessorCount)));
         }
+
+        private sealed record SubjectInfo(int SubjectId, string Name, int Grade, string TeacherName, int SchoolId);
 
         // Current academic year for a school: same resolution as YearRolloverService.ResolveYearsAsync and the Teacher pages.
         public async Task<int> ResolveCurrentYearAsync(int schoolId) =>
             await _db.Subjects.Where(s => s.SchoolId == schoolId)
                 .Select(s => (int?)s.AcademicYear).MaxAsync() ?? DateTime.Now.Year;
 
+        // Cache control -------------------------------------------------------------------------------------------
+
+        public void InvalidateSubject(int subjectId) => _cache.Remove(Key(subjectId));
+
+        public void InvalidateSchool(int schoolId)
+        {
+            if (SchoolTokens.TryRemove(schoolId, out var cts)) cts.Cancel();
+        }
+
+        private static string Key(int subjectId) => $"risk:subject:{subjectId}";
+
         // Every filter is applied on top of the mandatory school + current-year scope, so a subjectId/teacherId/grade
         // from another school or year simply matches nothing.
         public async Task<SchoolRiskOverview> BuildAsync(int schoolId, int? teacherId = null, int? grade = null,
-            int? subjectId = null, bool includeLearnerNames = false)
+            int? subjectId = null, bool includeLearnerNames = false, bool useCache = true,
+            IProgress<RiskBuildProgress>? progress = null, CancellationToken ct = default)
         {
             var school = await _db.Schools.AsNoTracking()
                 .Where(s => s.SchoolId == schoolId)
                 .Select(s => new { s.Name, s.Code })
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
 
             var year = await ResolveCurrentYearAsync(schoolId);
             var overview = new SchoolRiskOverview
@@ -127,40 +184,30 @@ namespace ARIS1.Services
 
             var subjects = await query
                 .OrderBy(s => s.Grade).ThenBy(s => s.Name)
-                .Select(s => new { s.SubjectId, s.Name, s.Grade, TeacherName = s.Teacher.User.Fullname })
-                .ToListAsync();
+                .Select(s => new SubjectInfo(s.SubjectId, s.Name, s.Grade, s.Teacher.User.Fullname, schoolId))
+                .ToListAsync(ct);
             if (subjects.Count == 0) return overview;
 
-            // One query for every enrolment, grouped in memory.
-            var subjectIds = subjects.Select(s => s.SubjectId).ToList();
-            var enrolments = (await _db.LearnerSubjects.AsNoTracking()
-                    .Where(ls => subjectIds.Contains(ls.SubjectId))
-                    .Select(ls => new { ls.SubjectId, ls.LearnerId })
-                    .ToListAsync())
-                .GroupBy(e => e.SubjectId)
-                .ToDictionary(g => g.Key, g => g.Select(e => e.LearnerId).ToList());
+            var summaries = new SubjectRiskSummary[subjects.Count];
+            var done = 0;
+            var fromCache = 0;
+            progress?.Report(new RiskBuildProgress(0, subjects.Count, null));
 
-            foreach (var s in subjects)
-            {
-                var learnerIds = enrolments.TryGetValue(s.SubjectId, out var ids) ? ids : new List<int>();
-                var summary = new SubjectRiskSummary
+            await Parallel.ForEachAsync(Enumerable.Range(0, subjects.Count),
+                new ParallelOptions { MaxDegreeOfParallelism = _maxParallelism, CancellationToken = ct },
+                async (i, token) =>
                 {
-                    SubjectId = s.SubjectId,
-                    SubjectName = s.Name,
-                    Grade = s.Grade,
-                    TeacherName = s.TeacherName,
-                    TotalLearners = learnerIds.Count
-                };
+                    var (task, cached) = GetSubject(subjects[i], useCache);
+                    if (cached) Interlocked.Increment(ref fromCache);
+                    // Waiting can be cancelled by this caller; the shared calculation itself is never cancelled.
+                    summaries[i] = await task.WaitAsync(token);
+                    progress?.Report(new RiskBuildProgress(Interlocked.Increment(ref done), subjects.Count, subjects[i].Name));
+                });
 
-                if (learnerIds.Count > 0)
-                {
-                    summary.Risks = await _risk.CalculateRiskScoresForSubject(s.SubjectId, learnerIds);
-                    foreach (var learnerId in learnerIds)
-                        summary.Counts[summary.Risks[learnerId].Level]++;
-                }
-
-                overview.Subjects.Add(summary);
-            }
+            overview.Subjects = summaries.ToList();
+            overview.SubjectsFromCache = fromCache;
+            overview.SubjectsComputed = subjects.Count - fromCache;
+            overview.AsOfUtc = summaries.Min(s => s.ComputedAtUtc);
 
             if (includeLearnerNames)
             {
@@ -168,14 +215,82 @@ namespace ARIS1.Services
                 var labels = await _db.Learners.AsNoTracking()
                     .Where(l => allLearnerIds.Contains(l.LearnerId))
                     .Select(l => new { l.LearnerId, l.User.Fullname, ClassName = l.Class.Name, l.Grade })
-                    .ToListAsync();
+                    .ToListAsync(ct);
                 var byId = labels.ToDictionary(l => l.LearnerId, l => new LearnerLabel(l.Fullname, $"{l.Grade}{l.ClassName}"));
-                foreach (var summary in overview.Subjects)
-                    foreach (var id in summary.Risks.Keys)
-                        if (byId.TryGetValue(id, out var label)) summary.Learners[id] = label;
+                // Names go on copies: the cached summaries are shared and stay name-free.
+                overview.Subjects = overview.Subjects
+                    .Select(s => s.WithLearners(s.Risks.Keys.Where(byId.ContainsKey).ToDictionary(id => id, id => byId[id])))
+                    .ToList();
             }
 
             return overview;
+        }
+
+        // Returns the (possibly shared) calculation for one subject and whether it came from the cache.
+        private (Task<SubjectRiskSummary> Task, bool Cached) GetSubject(SubjectInfo subject, bool useCache)
+        {
+            if (!useCache) return (ComputeSubjectAsync(subject), false);
+
+            var key = Key(subject.SubjectId);
+            Lazy<Task<SubjectRiskSummary>> lazy;
+            bool cached;
+            // Atomic get-or-create so two simultaneous requests share one calculation instead of both starting one.
+            lock (CreateLock)
+            {
+                cached = _cache.TryGetValue(key, out Lazy<Task<SubjectRiskSummary>>? existing) && existing != null;
+                if (cached)
+                {
+                    lazy = existing!;
+                }
+                else
+                {
+                    lazy = new Lazy<Task<SubjectRiskSummary>>(() => ComputeSubjectAsync(subject), LazyThreadSafetyMode.ExecutionAndPublication);
+                    var token = SchoolTokens.GetOrAdd(subject.SchoolId, _ => new CancellationTokenSource()).Token;
+                    _cache.Set(key, lazy, new MemoryCacheEntryOptions()
+                        .SetAbsoluteExpiration(_cacheDuration)
+                        .AddExpirationToken(new CancellationChangeToken(token)));
+                }
+            }
+
+            var task = lazy.Value;
+            // A failed calculation must not be remembered.
+            task.ContinueWith(t => { if (t.IsFaulted || t.IsCanceled) _cache.Remove(key); },
+                CancellationToken.None, TaskContinuationOptions.NotOnRanToCompletion, TaskScheduler.Default);
+            return (task, cached);
+        }
+
+        // Own scope per calculation: a scoped AppDbContext cannot be used by two operations at once.
+        private async Task<SubjectRiskSummary> ComputeSubjectAsync(SubjectInfo subject)
+        {
+            Interlocked.Increment(ref _subjectComputations);
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var risk = scope.ServiceProvider.GetRequiredService<RiskAssessmentService>();
+
+            var learnerIds = await db.LearnerSubjects.AsNoTracking()
+                .Where(ls => ls.SubjectId == subject.SubjectId)
+                .Select(ls => ls.LearnerId)
+                .ToListAsync();
+
+            var summary = new SubjectRiskSummary
+            {
+                SubjectId = subject.SubjectId,
+                SubjectName = subject.Name,
+                Grade = subject.Grade,
+                TeacherName = subject.TeacherName,
+                TotalLearners = learnerIds.Count
+            };
+
+            if (learnerIds.Count > 0)
+            {
+                summary.Risks = await risk.CalculateRiskScoresForSubject(subject.SubjectId, learnerIds);
+                foreach (var learnerId in learnerIds)
+                    summary.Counts[summary.Risks[learnerId].Level]++;
+            }
+
+            summary.ComputedAtUtc = DateTime.UtcNow;
+            _log.LogDebug("Risk calculated for subject {SubjectId} ({Name}, grade {Grade}): {Learners} learners", subject.SubjectId, subject.Name, subject.Grade, learnerIds.Count);
+            return summary;
         }
 
         public static RiskAggregate Aggregate(IEnumerable<SubjectRiskSummary> subjects)

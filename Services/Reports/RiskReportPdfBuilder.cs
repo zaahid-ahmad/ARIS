@@ -53,7 +53,7 @@ namespace ARIS1.Services.Reports
                         {
                             r.RelativeItem().Column(c =>
                             {
-                                c.Item().Text($"Generated {generated} by {options.AdminName}").FontSize(8).FontColor(Muted);
+                                c.Item().Text($"Generated {generated} by {options.AdminName}  |  Data as of {overview.AsOfUtc.ToLocalTime():HH:mm}").FontSize(8).FontColor(Muted);
                                 if (options.IncludeNames)
                                     c.Item().Text("CONFIDENTIAL - contains learner information").FontSize(8).SemiBold().FontColor("#b91c1c");
                             });

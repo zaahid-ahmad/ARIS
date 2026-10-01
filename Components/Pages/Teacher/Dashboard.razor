@@ -173,7 +173,7 @@ else
 
         // RiskOverviewService is the single batched risk walk (current year, this teacher's subjects only) shared with
         // the Admin Risk Overview; the banner count is its distinct at-risk learners, as before.
-        var overview = await RiskOverviewSvc.BuildAsync(currentSchoolId!.Value, teacherId: teacher.TeacherId);
+        var overview = await RiskOverviewSvc.BuildAsync(currentSchoolId!.Value, teacherId: teacher.TeacherId, useCache: false);
 
         atRiskLearnerCount = overview.Total.AtRisk;
         subjectRiskCards = overview.Subjects;

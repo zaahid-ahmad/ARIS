@@ -7,13 +7,14 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
 @inject ARIS1.Services.RiskOverviewService RiskOverviewSvc
+@implements IDisposable
 @rendermode InteractiveServer
 
 <p>Welcome, @currentUser?.Fullname</p>
 
 @if (isLoadingRisk)
 {
-    <p class="text-muted">Checking learners...</p>
+    <ProgressPanel Compact="true" Message="Checking learners..." />
 }
 else if (riskTotal != null)
 {
@@ -29,6 +30,7 @@ else if (riskTotal != null)
             <span>
                 <strong>⚠ @riskTotal.AtRisk of @riskTotal.Total learner@(riskTotal.Total == 1 ? "" : "s") (@riskTotal.AtRiskPercent.ToString("0.#")%) @(riskTotal.AtRisk == 1 ? "is" : "are") at risk</strong>
                 across the school.
+                <small class="ms-1 opacity-75">Data as of @riskAsOf</small>
             </span>
             <span class="badge bg-light text-danger">View Risk Overview →</span>
         </div>
@@ -107,30 +109,50 @@ else if (riskTotal != null)
 @code {
     private User? currentUser;
     private ARIS1.Services.RiskAggregate? riskTotal;
+    private string riskAsOf = string.Empty;
     private bool isLoadingRisk = true;
+    private bool riskStarted;
+    private readonly CancellationTokenSource cts = new();
 
     protected override async Task OnInitializedAsync()
     {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+            currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
+    }
+
+    // The at-risk banner needs a school-wide calculation, so it loads AFTER the dashboard has painted (and only once,
+    // on the live circuit — OnAfterRender doesn't run during prerender). Signing in never waits on it.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || riskStarted) return;
+        riskStarted = true;
+
         try
         {
-            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-            var user = authState.User;
-            if (user.Identity?.IsAuthenticated == true)
-                currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
-
             if (currentUser?.SchoolId is int schoolId)
-                riskTotal = (await RiskOverviewSvc.BuildAsync(schoolId)).Total;
+            {
+                var overview = await RiskOverviewSvc.BuildAsync(schoolId, ct: cts.Token);
+                riskTotal = overview.Total;
+                riskAsOf = overview.AsOfUtc.ToLocalTime().ToString("HH:mm");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return; // left the page; nothing to show
         }
         catch
         {
             // The banner is a convenience; a failure must not break the dashboard itself.
             riskTotal = null;
         }
-        finally
-        {
-            isLoadingRisk = false;
-        }
+
+        isLoadingRisk = false;
+        StateHasChanged();
     }
+
+    public void Dispose() => cts.Cancel();
 
     private void Logout()
     {
