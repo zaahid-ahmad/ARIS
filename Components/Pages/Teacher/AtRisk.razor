@@ -6,7 +6,7 @@
 @using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
 @using ARIS1.Services
-@attribute [Authorize(Roles = "Teacher")]
+@attribute [Authorize(Roles = "Teacher,Admin")]
 @rendermode InteractiveServer
 @inject AppDbContext DbContext
 @inject UserManager<User> UserManager
@@ -33,7 +33,7 @@ else
                 @foreach (var subject in subjects)
                 {
                     <option value="@subject.SubjectId">
-                        @subject.Name (Grade @subject.Grade)
+                        @subject.Name (Grade @subject.Grade)@(isAdmin && teacherNames.TryGetValue(subject.SubjectId, out var teacherName) ? $" · {teacherName}" : "")
                     </option>
                 }
             </select>
@@ -50,28 +50,15 @@ else
             <div class="card-body">
                 <div style="position: relative; max-width: 640px;">
                     <svg viewBox="0 0 620 420" style="width: 100%; height: auto; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">
-                        @foreach (var tick in ChartTicks)
-                        {
-                            var gx = ChartX(tick);
-                            var gy = ChartY(tick);
-                            <line x1="@gx" y1="@ChartTop" x2="@gx" y2="@(ChartTop + PlotHeight)" stroke="#e1e0d9" stroke-width="1" />
-                            <line x1="@ChartLeft" y1="@gy" x2="@(ChartLeft + PlotWidth)" y2="@gy" stroke="#e1e0d9" stroke-width="1" />
-                            @TickLabelX(tick)
-                            @TickLabelY(tick)
-                        }
-
-                        <line x1="@ChartLeft" y1="@ChartTop" x2="@ChartLeft" y2="@(ChartTop + PlotHeight)" stroke="#c3c2b7" stroke-width="1" />
-                        <line x1="@ChartLeft" y1="@(ChartTop + PlotHeight)" x2="@(ChartLeft + PlotWidth)" y2="@(ChartTop + PlotHeight)" stroke="#c3c2b7" stroke-width="1" />
-
-                        <text x="@(ChartLeft + PlotWidth / 2)" y="@(ChartHeight - 8)" font-size="12" fill="#52514e" text-anchor="middle">Attendance %</text>
-                        <text x="12" y="14" font-size="12" fill="#52514e">Academic Average %</text>
+                        @* Gridlines/axes/labels come from RiskChartSvg, shared with the PDF report; the dots stay here so they can take hover/focus events. *@
+                        @((MarkupString)RiskChartSvg.ScatterFrame())
 
                         @foreach (var learner in allLearnersInSubject)
                         {
                             var risk = learnerRiskCache[learner.LearnerId];
-                            var cx = ChartX(risk.AttendancePercentage);
-                            var cy = ChartY(risk.AcademicAverage);
-                            var color = StatusColor(risk.Level);
+                            var cx = RiskChartSvg.X(risk.AttendancePercentage);
+                            var cy = RiskChartSvg.Y(risk.AcademicAverage);
+                            var color = RiskPalette.Color(risk.Level);
                             var learnerId = learner.LearnerId;
                             <circle cx="@cx" cy="@cy" r="5" fill="@color" stroke="#fcfcfb" stroke-width="2" />
                             <circle cx="@cx" cy="@cy" r="12" fill="transparent" tabindex="0" style="cursor: pointer;"
@@ -85,8 +72,8 @@ else
                     @if (hoveredLearnerId.HasValue && learnerRiskCache.TryGetValue(hoveredLearnerId.Value, out var hoveredRisk))
                     {
                         var hoveredLearner = allLearnersInSubject.First(l => l.LearnerId == hoveredLearnerId.Value);
-                        var leftPct = ChartX(hoveredRisk.AttendancePercentage) / ChartWidth * 100;
-                        var topPct = ChartY(hoveredRisk.AcademicAverage) / ChartHeight * 100;
+                        var leftPct = RiskChartSvg.X(hoveredRisk.AttendancePercentage) / RiskChartSvg.ChartWidth * 100;
+                        var topPct = RiskChartSvg.Y(hoveredRisk.AcademicAverage) / RiskChartSvg.ChartHeight * 100;
                         <div style="position: absolute; left: @(leftPct.ToString("F1"))%; top: @(topPct.ToString("F1"))%; transform: translate(-50%, -120%);
                                     background: #0b0b0b; color: #ffffff; padding: 8px 12px; border-radius: 6px;
                                     font-size: 12px; white-space: nowrap; pointer-events: none; z-index: 10;">
@@ -94,7 +81,7 @@ else
                             <div>Academic Average: <strong>@hoveredRisk.AcademicAverage.ToString("F1")%</strong></div>
                             <div>Attendance: <strong>@hoveredRisk.AttendancePercentage.ToString("F1")%</strong></div>
                             <div>
-                                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:@StatusColor(hoveredRisk.Level);margin-right:4px;"></span>
+                                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:@RiskPalette.Color(hoveredRisk.Level);margin-right:4px;"></span>
                                 Risk: <strong>@hoveredRisk.Level</strong>
                             </div>
                         </div>
@@ -102,7 +89,7 @@ else
                 </div>
 
                 <div class="d-flex gap-3 mt-3 flex-wrap">
-                    @foreach (var (level, color) in RiskLevelLegend)
+                    @foreach (var (level, color) in RiskPalette.Levels)
                     {
                         <div class="d-flex align-items-center gap-1">
                             <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:@color;"></span>
@@ -133,7 +120,7 @@ else
                                     <tr>
                                         <td>@learner.User?.Fullname</td>
                                         <td>
-                                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:@StatusColor(risk.Level);margin-right:4px;"></span>
+                                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:@RiskPalette.Color(risk.Level);margin-right:4px;"></span>
                                             @risk.Level
                                         </td>
                                         <td>@risk.AttendancePercentage.ToString("F1")%</td>
@@ -209,6 +196,8 @@ else
     private int selectedSubjectId = 0;
     private bool hasLoaded = false;
     private Teacher? currentTeacher;
+    private bool isAdmin;
+    private Dictionary<int, string> teacherNames = new();
     private int? currentSchoolId;
     private string errorMessage = string.Empty;
     private int? hoveredLearnerId;
@@ -220,66 +209,6 @@ else
     private List<Learner> PagedAtRisk => atRiskLearners.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
     private void GoToPage(int page) => currentPage = page;
 
-    // Scatter chart geometry (SVG viewBox units)
-    private const double ChartWidth = 620;
-    private const double ChartHeight = 420;
-    private const double ChartLeft = 60;
-    private const double ChartTop = 20;
-    private const double ChartRight = 20;
-    private const double ChartBottomMargin = 50;
-    private static double PlotWidth => ChartWidth - ChartLeft - ChartRight;
-    private static double PlotHeight => ChartHeight - ChartTop - ChartBottomMargin;
-    private static readonly int[] ChartTicks = { 0, 20, 40, 60, 80, 100 };
-
-    private static double ChartX(decimal attendancePercentage)
-    {
-        var clamped = (double)Math.Clamp(attendancePercentage, 0, 100);
-        return ChartLeft + (clamped / 100.0) * PlotWidth;
-    }
-
-    private static double ChartX(int attendancePercentage) => ChartX((decimal)attendancePercentage);
-
-    private static double ChartY(decimal academicAverage)
-    {
-        var clamped = (double)Math.Clamp(academicAverage, 0, 100);
-        return ChartTop + (1 - clamped / 100.0) * PlotHeight;
-    }
-
-    private static double ChartY(int academicAverage) => ChartY((decimal)academicAverage);
-
-    // Rendered via MarkupString: a bare <text> element as the first markup inside a
-    // @foreach code block collides with Razor's own reserved <text> transition tag (RZ1023).
-    private static MarkupString TickLabelX(int tick)
-    {
-        var gx = ChartX(tick).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var y = (ChartTop + PlotHeight + 18).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        return new MarkupString(
-            $"<text x=\"{gx}\" y=\"{y}\" font-size=\"11\" fill=\"#898781\" text-anchor=\"middle\">{tick}</text>");
-    }
-
-    private static MarkupString TickLabelY(int tick)
-    {
-        var x = (ChartLeft - 8).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var gy = (ChartY(tick) + 4).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        return new MarkupString(
-            $"<text x=\"{x}\" y=\"{gy}\" font-size=\"11\" fill=\"#898781\" text-anchor=\"end\">{tick}</text>");
-    }
-
-    private static readonly (string Level, string Color)[] RiskLevelLegend =
-    {
-        ("Critical", "#d03b3b"),
-        ("High", "#ec835a"),
-        ("Moderate", "#fab219"),
-        ("Low", "#0ca30c")
-    };
-
-    private static string StatusColor(string level) => level switch
-    {
-        "Critical" => "#d03b3b",
-        "High" => "#ec835a",
-        "Moderate" => "#fab219",
-        _ => "#0ca30c" // Low
-    };
 
     private void ViewLearnerProfile(Learner learner)
     {
@@ -293,18 +222,28 @@ else
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             var user = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
 
-            currentTeacher = await DbContext.Teachers
-                .AsNoTracking()
-                .Include(t => t.User)
-                .FirstOrDefaultAsync(t => t.UserId == user!.Id);
+            isAdmin = authState.User.IsInRole("Admin");
 
-            if (currentTeacher == null)
+            if (isAdmin)
             {
-                errorMessage = "You are not registered as a teacher.";
-                return;
+                // Admins drill down into any subject in their own school (same Teacher,Admin split as LearnerProfiles.razor).
+                currentSchoolId = user?.SchoolId;
             }
+            else
+            {
+                currentTeacher = await DbContext.Teachers
+                    .AsNoTracking()
+                    .Include(t => t.User)
+                    .FirstOrDefaultAsync(t => t.UserId == user!.Id);
 
-            currentSchoolId = currentTeacher.User?.SchoolId;
+                if (currentTeacher == null)
+                {
+                    errorMessage = "You are not registered as a teacher.";
+                    return;
+                }
+
+                currentSchoolId = currentTeacher.User?.SchoolId;
+            }
 
             if (currentSchoolId == null)
             {
@@ -317,11 +256,24 @@ else
                 .Select(s => (int?)s.AcademicYear)
                 .MaxAsync() ?? DateTime.Now.Year;
 
-            // Only load subjects from this teacher's school, for the current academic year
-            subjects = await DbContext.Subjects
+            // Only subjects from this user's school and the current academic year; a teacher additionally only their own.
+            var subjectQuery = DbContext.Subjects
                 .AsNoTracking()
-                .Where(s => s.TeacherId == currentTeacher.TeacherId && s.SchoolId == currentSchoolId && s.AcademicYear == currentYear)
-                .ToListAsync();
+                .Where(s => s.SchoolId == currentSchoolId && s.AcademicYear == currentYear);
+            if (!isAdmin)
+                subjectQuery = subjectQuery.Where(s => s.TeacherId == currentTeacher!.TeacherId);
+
+            subjects = await subjectQuery.OrderBy(s => s.Grade).ThenBy(s => s.Name).ToListAsync();
+
+            if (isAdmin)
+            {
+                var ids = subjects.Select(s => s.SubjectId).ToList();
+                teacherNames = await DbContext.Subjects
+                    .AsNoTracking()
+                    .Where(s => ids.Contains(s.SubjectId))
+                    .Select(s => new { s.SubjectId, s.Teacher.User.Fullname })
+                    .ToDictionaryAsync(x => x.SubjectId, x => x.Fullname);
+            }
 
             // Deep-linked from a specific subject (e.g. Teacher/Dashboard.razor's risk-donut
             // cards) — pre-select it and load immediately instead of leaving the teacher to

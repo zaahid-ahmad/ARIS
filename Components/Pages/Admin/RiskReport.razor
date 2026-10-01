@@ -1,0 +1,317 @@
+@page "/admin/risk-report"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using ARIS1.Models
+@using ARIS1.Data
+@using ARIS1.Services
+@using ARIS1.Services.Reports
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AppDbContext DbContext
+@inject RiskOverviewService RiskOverviewSvc
+@inject RiskReportPdfBuilder PdfBuilder
+@inject IJSRuntime JS
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (!loaded)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="row">
+        <div class="col-lg-4 mb-3">
+            <div class="card">
+                <div class="card-header"><span class="card-title">Report options</span></div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Scope</label>
+                        <select class="form-control" @bind="scope">
+                            <option value="school">Whole school</option>
+                            <option value="grade">One grade</option>
+                            <option value="subject">One subject</option>
+                        </select>
+                    </div>
+
+                    @if (scope == "grade")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Grade</label>
+                            <select class="form-control" @bind="selectedGrade">
+                                @foreach (var g in grades)
+                                {
+                                    <option value="@g">Grade @g</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                    else if (scope == "subject")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Subject</label>
+                            <select class="form-control" @bind="selectedSubjectId">
+                                <option value="0">-- Select subject --</option>
+                                @foreach (var s in subjects)
+                                {
+                                    <option value="@s.SubjectId">@s.Name (Grade @s.Grade)</option>
+                                }
+                            </select>
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label">Report title</label>
+                        <input class="form-control" @bind="title" @bind:event="oninput" maxlength="100" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Notes for this report <small class="text-muted">(optional, shown in the Overview)</small></label>
+                        <textarea class="form-control" rows="4" maxlength="2000" @bind="notes" @bind:event="oninput"
+                                  placeholder="Context for the meeting, e.g. what has changed since the last report."></textarea>
+                        <small class="text-muted">@notes.Length / 2000</small>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="includeNames" @bind="includeNames" />
+                        <label class="form-check-label" for="includeNames">
+                            Include at-risk learner names (appendix)
+                        </label>
+                        <div><small class="text-muted">Off by default so the report is safe to show in a meeting. Marked confidential when on.</small></div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" disabled="@isGenerating" @onclick="Generate">
+                            @(isGenerating ? "Generating..." : hasPreview ? "Update preview" : "Generate preview")
+                        </button>
+                        <button class="btn btn-success" disabled="@(!hasPreview || isStale || isGenerating)" @onclick="Download">
+                            <i class="fas fa-download"></i> Download PDF
+                        </button>
+                    </div>
+                    @if (hasPreview && isStale)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0">
+                            The options have changed since this preview. Click <strong>Update preview</strong> before downloading.
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8 mb-3">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="card-title">Preview</span>
+                    @if (!string.IsNullOrEmpty(fingerprint))
+                    {
+                        <small class="text-muted" title="SHA-256 of the previewed file; the downloaded file is identical.">File ID @fingerprint[..Math.Min(12, fingerprint.Length)]</small>
+                    }
+                </div>
+                <div class="card-body p-0">
+                    @if (!hasPreview)
+                    {
+                        <p class="text-muted p-3 mb-0">@(isGenerating ? "Generating the report..." : "The report preview will appear here.")</p>
+                    }
+                    <iframe @ref="previewFrame" title="Report preview" style="width:100%; height:80vh; border:0; @(hasPreview ? "" : "display:none;")"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "grade")] public int? GradeFromQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "subject")] public int? SubjectFromQuery { get; set; }
+
+    private record SubjectOption(int SubjectId, string Name, int Grade);
+
+    private User? admin;
+    private int schoolId;
+    private List<SubjectOption> subjects = new();
+    private List<int> grades = new();
+
+    private string scope = "school";
+    private int selectedGrade;
+    private int selectedSubjectId;
+    private string title = "Academic Risk Report";
+    private string notes = string.Empty;
+    private bool includeNames;
+
+    private bool loaded;
+    private bool isGenerating;
+    private bool hasPreview;
+    private string generatedSignature = string.Empty;
+    private string fingerprint = string.Empty;
+    private string errorMessage = string.Empty;
+    private bool autoGenerated;
+
+    private ElementReference previewFrame;
+    private IJSObjectReference? jsModule;
+    private string lastFileName = "ARIS-Risk-Report.pdf";
+
+    private string CurrentSignature() => $"{scope}|{selectedGrade}|{selectedSubjectId}|{title}|{notes}|{includeNames}";
+    private bool isStale => hasPreview && generatedSignature != CurrentSignature();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            admin = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+            if (admin?.SchoolId == null)
+            {
+                errorMessage = "You are not assigned to a school.";
+                return;
+            }
+            schoolId = admin.SchoolId.Value;
+
+            var year = await RiskOverviewSvc.ResolveCurrentYearAsync(schoolId);
+            subjects = await DbContext.Subjects.AsNoTracking()
+                .Where(s => s.SchoolId == schoolId && s.AcademicYear == year)
+                .OrderBy(s => s.Grade).ThenBy(s => s.Name)
+                .Select(s => new SubjectOption(s.SubjectId, s.Name, s.Grade))
+                .ToListAsync();
+            grades = subjects.Select(s => s.Grade).Distinct().OrderBy(g => g).ToList();
+            selectedGrade = grades.FirstOrDefault();
+
+            // Prefill scope from the overview page's link. Both are checked against this school's own lists;
+            // anything unknown (e.g. another school's subject id) is ignored and the scope stays "whole school".
+            if (SubjectFromQuery is int sid && subjects.Any(s => s.SubjectId == sid))
+            {
+                scope = "subject";
+                selectedSubjectId = sid;
+            }
+            else if (GradeFromQuery is int g && grades.Contains(g))
+            {
+                scope = "grade";
+                selectedGrade = g;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            loaded = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // First preview is produced automatically so the admin lands on a finished report.
+        if (loaded && !autoGenerated && admin != null && string.IsNullOrEmpty(errorMessage))
+        {
+            autoGenerated = true;
+            await Generate();
+        }
+    }
+
+    private async Task Generate()
+    {
+        if (isGenerating) return;
+        isGenerating = true;
+        errorMessage = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Re-validate every bound value against the already-loaded, school-scoped lists at the point of use.
+            int? grade = null;
+            int? subjectId = null;
+            var kind = RiskReportScope.School;
+            var scopeLabel = "Whole school - all grades and subjects";
+            var scopeSlug = "School";
+
+            if (scope == "grade")
+            {
+                if (!grades.Contains(selectedGrade)) { errorMessage = "Select a valid grade."; return; }
+                grade = selectedGrade;
+                kind = RiskReportScope.Grade;
+                scopeLabel = $"Grade {selectedGrade} - all subjects";
+                scopeSlug = $"Grade{selectedGrade}";
+            }
+            else if (scope == "subject")
+            {
+                var subject = subjects.FirstOrDefault(s => s.SubjectId == selectedSubjectId);
+                if (subject == null) { errorMessage = "Select a subject."; return; }
+                subjectId = subject.SubjectId;
+                kind = RiskReportScope.Subject;
+                scopeLabel = $"{subject.Name} (Grade {subject.Grade})";
+                scopeSlug = $"{subject.Name}-G{subject.Grade}";
+            }
+            else if (scope != "school")
+            {
+                errorMessage = "Select a valid scope.";
+                return;
+            }
+
+            var overview = await RiskOverviewSvc.BuildAsync(schoolId, grade: grade, subjectId: subjectId, includeLearnerNames: includeNames);
+            var options = new RiskReportOptions
+            {
+                Title = string.IsNullOrWhiteSpace(title) ? "Academic Risk Report" : title.Trim(),
+                Notes = notes.Length > 2000 ? notes[..2000] : notes,
+                IncludeNames = includeNames,
+                Scope = kind,
+                ScopeLabel = scopeLabel,
+                AdminName = admin!.Fullname,
+                GeneratedAt = DateTime.Now
+            };
+
+            var bytes = PdfBuilder.Build(overview, options);
+
+            jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Admin/RiskReport.razor.js");
+            using var stream = new MemoryStream(bytes);
+            using var streamRef = new DotNetStreamReference(stream);
+            fingerprint = await jsModule.InvokeAsync<string>("showPdf", previewFrame, streamRef);
+
+            lastFileName = SafeFileName($"ARIS-Risk-Report-{overview.SchoolCode}-{scopeSlug}-{DateTime.Now:yyyy-MM-dd}.pdf");
+            generatedSignature = CurrentSignature();
+            hasPreview = true;
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit went away mid-generation; nothing to show.
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not generate the report: {ex.Message}";
+        }
+        finally
+        {
+            isGenerating = false;
+        }
+    }
+
+    private async Task Download()
+    {
+        if (jsModule == null || !hasPreview || isStale) return;
+        await jsModule.InvokeVoidAsync("downloadPdf", lastFileName);
+    }
+
+    private static string SafeFileName(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '-');
+        return name.Replace(' ', '-');
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (jsModule == null) return;
+        try
+        {
+            await jsModule.InvokeVoidAsync("dispose");
+            await jsModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone; the browser frees the blob URL with the page.
+        }
+    }
+}

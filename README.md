@@ -168,6 +168,7 @@ Restart the app after changing secrets.
 - **ASP.NET Core Identity** — authentication and role management
 - **Bootstrap** — UI styling
 - **MailKit** — SMTP email (optional, see setup above)
+- **QuestPDF** — generates the principal's PDF risk report (Admin → Risk Overview → Create report)
 - **Groq API** (OpenAI-compatible) — AI chatbot (optional, see setup above)
 
 ---

@@ -6,9 +6,34 @@
 @inject UserManager<User> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
+@inject ARIS1.Services.RiskOverviewService RiskOverviewSvc
 @rendermode InteractiveServer
 
 <p>Welcome, @currentUser?.Fullname</p>
+
+@if (isLoadingRisk)
+{
+    <p class="text-muted">Checking learners...</p>
+}
+else if (riskTotal != null)
+{
+    @if (riskTotal.AtRisk == 0)
+    {
+        <div class="alert alert-success">No at-risk learners across the school.</div>
+    }
+    else
+    {
+        <div class="alert alert-danger d-flex justify-content-between align-items-center"
+             style="cursor: pointer;"
+             @onclick='() => Navigation.NavigateTo("/admin/risk-overview")'>
+            <span>
+                <strong>⚠ @riskTotal.AtRisk of @riskTotal.Total learner@(riskTotal.Total == 1 ? "" : "s") (@riskTotal.AtRiskPercent.ToString("0.#")%) @(riskTotal.AtRisk == 1 ? "is" : "are") at risk</strong>
+                across the school.
+            </span>
+            <span class="badge bg-light text-danger">View Risk Overview →</span>
+        </div>
+    }
+}
 
 <div class="row mt-4">
     <div class="col-md-3">
@@ -54,6 +79,18 @@
         </div>
     </div>
     <div class="col-md-3">
+        <div class="card text-white bg-warning mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Risk Overview</h5>
+                <p class="card-text">School-wide risk, by grade and subject. Export a PDF report.</p>
+                <button class="btn btn-light"
+                        @onclick='() => Navigation.NavigateTo("/admin/risk-overview")'>
+                    Go
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
         <div class="card text-white bg-danger mb-3">
             <div class="card-body">
                 <h5 class="card-title">Attendance</h5>
@@ -69,13 +106,30 @@
 
 @code {
     private User? currentUser;
+    private ARIS1.Services.RiskAggregate? riskTotal;
+    private bool isLoadingRisk = true;
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = authState.User;
-        if (user.Identity?.IsAuthenticated == true)
-            currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity?.IsAuthenticated == true)
+                currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
+
+            if (currentUser?.SchoolId is int schoolId)
+                riskTotal = (await RiskOverviewSvc.BuildAsync(schoolId)).Total;
+        }
+        catch
+        {
+            // The banner is a convenience; a failure must not break the dashboard itself.
+            riskTotal = null;
+        }
+        finally
+        {
+            isLoadingRisk = false;
+        }
     }
 
     private void Logout()

@@ -19,6 +19,8 @@ builder.Services.AddScoped<InterventionService>();
 builder.Services.AddScoped<WeightCalculationService>();
 builder.Services.AddScoped<SchoolAuthorizationService>();
 builder.Services.AddScoped<RiskAssessmentService>();
+builder.Services.AddScoped<RiskOverviewService>();
+builder.Services.AddScoped<ARIS1.Services.Reports.RiskReportPdfBuilder>();
 builder.Services.AddScoped<BulkUserImportService>();
 builder.Services.AddScoped<BulkSubjectAllocationService>();
 builder.Services.AddScoped<YearRolloverService>();

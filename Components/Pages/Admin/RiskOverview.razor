@@ -1,0 +1,166 @@
+@page "/admin/risk-overview"
+@using Microsoft.AspNetCore.Authorization
+@using ARIS1.Models
+@using ARIS1.Services
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@inject RiskOverviewService RiskOverviewSvc
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (isLoading)
+{
+    <p>Calculating risk across the school...</p>
+}
+else if (overview != null)
+{
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <h5 class="mb-0">@overview.SchoolName</h5>
+            <small class="text-muted">Academic year @overview.AcademicYear. Learners are counted once, by their highest-risk subject.</small>
+        </div>
+        <button class="btn btn-primary" @onclick="CreateReport">
+            <i class="fas fa-file-pdf"></i> Create report (PDF)
+        </button>
+    </div>
+
+    <div class="tab-row">
+        <button class="tab-btn @(selectedGrade == null ? "active" : "")" @onclick="() => SelectGrade(null)">All grades</button>
+        @foreach (var grade in overview.Grades)
+        {
+            var g = grade;
+            <button class="tab-btn @(selectedGrade == g ? "active" : "")" @onclick="() => SelectGrade(g)">Grade @g</button>
+        }
+    </div>
+
+    @if (visibleSubjects.Count == 0)
+    {
+        <div class="alert alert-info">No subjects for the current academic year yet.</div>
+    }
+    else
+    {
+        var agg = RiskOverviewService.Aggregate(visibleSubjects);
+
+        <div class="stats-row">
+            <div class="stat-tile">
+                <div class="stat-tile-val">@agg.Total</div>
+                <div class="stat-tile-label">Learners enrolled</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-tile-val" style="color:@RiskPalette.Color("High")">@agg.AtRisk <small class="text-muted">(@agg.AtRiskPercent.ToString("0.#")%)</small></div>
+                <div class="stat-tile-label">At risk (High or Critical)</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-tile-val" style="color:@RiskPalette.Color("Critical")">@agg.Count("Critical")</div>
+                <div class="stat-tile-label">Critical</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-tile-val">@visibleSubjects.Count</div>
+                <div class="stat-tile-label">Subjects</div>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><span class="card-title">@(selectedGrade == null ? "Whole school" : $"Grade {selectedGrade}") risk distribution</span></div>
+            <div class="card-body d-flex align-items-center gap-4 flex-wrap">
+                @((MarkupString)RiskChartSvg.Donut(agg.Bands, agg.Total, 150, $"{(selectedGrade == null ? "Whole school" : $"Grade {selectedGrade}")} risk distribution"))
+                <div class="legend">
+                    @foreach (var band in agg.Bands)
+                    {
+                        <div class="legend-item">
+                            <span class="legend-icon" style="background:@band.Color;border-radius:50%;"></span>
+                            <small class="text-muted">@band.Level: @band.Count</small>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <h6 class="mb-2">Subjects <small class="text-muted">- select one to see its learners</small></h6>
+        <div class="row">
+            @foreach (var card in visibleSubjects)
+            {
+                var subjectId = card.SubjectId;
+                <div class="col-md-4">
+                    <div class="card mb-3" style="cursor: pointer;" @onclick='() => Navigation.NavigateTo($"/teacher/atrisk?subject={subjectId}")'>
+                        <div class="card-header">
+                            <span class="card-title">@card.SubjectName (Grade @card.Grade)</span>
+                            <div><small class="text-muted">@card.TeacherName</small></div>
+                        </div>
+                        <div class="card-body text-center">
+                            @if (card.TotalLearners == 0)
+                            {
+                                @((MarkupString)RiskChartSvg.Donut(card.Bands, 0, 96, $"{card.SubjectName} (Grade {card.Grade}) has no learners enrolled"))
+                                <p class="text-muted mt-2 mb-0">No learners enrolled</p>
+                            }
+                            else
+                            {
+                                @((MarkupString)RiskChartSvg.Donut(card.Bands, card.TotalLearners, 96, $"{card.SubjectName} (Grade {card.Grade}) risk distribution"))
+                                <div class="legend justify-content-center mt-2">
+                                    @foreach (var band in card.Bands.Where(b => b.Count > 0))
+                                    {
+                                        <div class="legend-item">
+                                            <span class="legend-icon" style="background:@band.Color;border-radius:50%;"></span>
+                                            <small class="text-muted">@band.Level: @band.Count</small>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private SchoolRiskOverview? overview;
+    private int? selectedGrade;
+    private bool isLoading = true;
+    private string errorMessage = string.Empty;
+
+    private List<SubjectRiskSummary> visibleSubjects =>
+        overview == null ? new() : overview.Subjects.Where(s => selectedGrade == null || s.Grade == selectedGrade).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var admin = await UserManager.FindByNameAsync(authState.User.Identity!.Name!);
+            if (admin?.SchoolId == null)
+            {
+                errorMessage = "You are not assigned to a school.";
+                return;
+            }
+
+            overview = await RiskOverviewSvc.BuildAsync(admin.SchoolId.Value);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void SelectGrade(int? grade)
+    {
+        // Only grades that actually have subjects are offered, but never trust the bound value.
+        selectedGrade = grade != null && overview != null && overview.Grades.Contains(grade.Value) ? grade : null;
+    }
+
+    private void CreateReport()
+    {
+        Navigation.NavigateTo(selectedGrade == null ? "/admin/risk-report" : $"/admin/risk-report?grade={selectedGrade}");
+    }
+}
