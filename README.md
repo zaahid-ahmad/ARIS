@@ -65,7 +65,9 @@ The following accounts are created automatically on first run:
 | SuperAdmin | superadmin@aris.com     | SuperAdmin@1234   | SUPERADMIN		|
 | Admin      | admin@aris.com          | Admin@1234        | DEFAULT		|
 
-- **SuperAdmin** manages schools and creates school administrators.
+- **SuperAdmin** manages schools and their administrators. A new school is
+  created together with its first admin in one step, so every school has
+  someone who can manage it. More admins can be added later under Admins.
 - **Admin** manages users, subjects, classes, assessments, and enrollment
   within their school (the seeded "Default School").
 

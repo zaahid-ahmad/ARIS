@@ -3,10 +3,15 @@
 @using Microsoft.AspNetCore.Authorization
 @using ARIS1.Models
 @using ARIS1.Data
+@using Microsoft.AspNetCore.Identity
+@using ARIS1.Services
 @attribute [Authorize(Roles = "SuperAdmin")]
 @rendermode InteractiveServer
 @inject AppDbContext DbContext
 @inject NavigationManager Navigation
+@inject UserManager<User> UserManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ARIS1.Services.Email.AccountEmailService AccountEmailService
 
 
 <button class="btn btn-primary mb-3" @onclick="ShowAddSchoolModal">+ Add School</button>
@@ -79,9 +84,57 @@ else
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(isEditMode ? "Edit School" : "Add School")</h5>
-                    <button type="button" class="btn-close" @onclick="() => showSchoolModal = false"></button>
+                    <h5 class="modal-title">
+                        @(isEditMode ? "Edit School" : wizardStep == 1 ? "Add School" : $"Assign Admin to {newSchool.Name}")
+                        @if (!isEditMode)
+                        {
+                            <small class="text-muted ms-2">Step @wizardStep of 2</small>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close" disabled="@isSaving" @onclick="() => showSchoolModal = false"></button>
                 </div>
+                @if (!isEditMode && wizardStep == 2)
+                {
+                <div class="modal-body">
+                    <p class="text-muted">Every school needs an admin. The school and its admin are created together. If either one fails, neither is saved.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Admin Full Name <span class="text-danger">*</span></label>
+                        <input class="form-control @(fullnameError != null ? "is-invalid" : "")"
+                               @bind="newAdminFullname" @oninput="@(() => fullnameError = null)"
+                               maxlength="100" placeholder="e.g. John Doe" />
+                        @if (fullnameError != null)
+                        {
+                            <div class="invalid-feedback">@fullnameError</div>
+                        }
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Admin Email <span class="text-danger">*</span></label>
+                        <input class="form-control @(adminEmailError != null ? "is-invalid" : "")"
+                               type="email" @bind="newAdminEmail" @oninput="@(() => adminEmailError = null)"
+                               maxlength="256" placeholder="e.g. john@school.com" />
+                        @if (adminEmailError != null)
+                        {
+                            <div class="invalid-feedback">@adminEmailError</div>
+                        }
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="sendSchoolAdminWelcome" @bind="sendWelcomeEmail" />
+                        <label class="form-check-label" for="sendSchoolAdminWelcome">Send a welcome email with a link to set their own password</label>
+                    </div>
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@modalError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" disabled="@isSaving" @onclick="() => wizardStep = 1">Back</button>
+                    <button class="btn btn-primary" disabled="@isSaving" @onclick="CreateSchoolWithAdmin">
+                        @(isSaving ? "Creating..." : "Create School & Admin")
+                    </button>
+                </div>
+                }
+                else
+                {
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label">School Name <span class="text-danger">*</span></label>
@@ -131,8 +184,16 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => showSchoolModal = false">Cancel</button>
-                    <button class="btn btn-primary" @onclick="SaveSchool">Save</button>
+                    @if (isEditMode)
+                    {
+                        <button class="btn btn-primary" @onclick="SaveSchool">Save</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="GoToAdminStep">Next: Assign Admin</button>
+                    }
                 </div>
+                }
             </div>
         </div>
     </div>
@@ -180,6 +241,17 @@ else
     private string? emailError;
     private string? phoneError;
 
+    // Add School is a two-step wizard (school details → first admin); nothing is written until step 2's
+    // "Create School & Admin", which saves both in one transaction so a school can never exist without an admin.
+    private int wizardStep = 1;
+    private bool isSaving;
+    private string newAdminFullname = string.Empty;
+    private string newAdminEmail = string.Empty;
+    private bool sendWelcomeEmail = true;
+    private string? fullnameError;
+    private string? adminEmailError;
+    private string? modalError;
+
     private int currentPage = 1;
     private const int PageSize = 15;
     private int totalPages => (int)Math.Ceiling((schools?.Count ?? 0) / (double)PageSize);
@@ -204,8 +276,13 @@ else
     {
         newSchool = new School();
         isEditMode = false;
+        wizardStep = 1;
+        newAdminFullname = string.Empty;
+        newAdminEmail = string.Empty;
+        sendWelcomeEmail = true;
         showSchoolModal = true;
         nameError = codeError = emailError = phoneError = null;
+        fullnameError = adminEmailError = modalError = null;
     }
 
     private void EditSchool(School school)
@@ -265,44 +342,159 @@ else
         return valid;
     }
 
+    private async Task<bool> ValidateSchoolStep()
+    {
+        if (!ValidateSchoolForm()) return false;
+
+        if (string.IsNullOrWhiteSpace(newSchool.Code))
+        { codeError = "School code is required."; return false; }
+
+        await ValidateCodeUniqueness();
+        return codeError == null;
+    }
+
+    private bool ValidateAdminForm()
+    {
+        fullnameError = adminEmailError = null;
+        var valid = true;
+
+        if (string.IsNullOrWhiteSpace(newAdminFullname))
+        { fullnameError = "Full name is required."; valid = false; }
+        else if (newAdminFullname.Trim().Length < 2)
+        { fullnameError = "Full name must be at least 2 characters."; valid = false; }
+
+        if (string.IsNullOrWhiteSpace(newAdminEmail))
+        { adminEmailError = "Email is required."; valid = false; }
+        else if (!new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(newAdminEmail))
+        { adminEmailError = "Enter a valid email address."; valid = false; }
+
+        return valid;
+    }
+
+    private async Task GoToAdminStep()
+    {
+        modalError = null;
+        if (!await ValidateSchoolStep()) return;
+        wizardStep = 2;
+    }
+
+    private async Task CreateSchoolWithAdmin()
+    {
+        if (isSaving) return;
+        isSaving = true;
+        errorMessage = successMessage = string.Empty;
+        modalError = null;
+
+        try
+        {
+            // Re-validate the school step too: the code could have been taken since step 1.
+            if (!await ValidateSchoolStep()) { wizardStep = 1; return; }
+            if (!ValidateAdminForm()) return;
+
+            var adminEmail = newAdminEmail.Trim();
+            if (await UserManager.FindByEmailAsync(adminEmail) != null)
+            { adminEmailError = "This email is already in use."; return; }
+
+            var tempPass = PasswordGenerator.Generate();
+            User? newAdmin = null;
+
+            // UserManager's store shares this circuit's scoped AppDbContext, so both writes are in this transaction.
+            await using (var transaction = await DbContext.Database.BeginTransactionAsync())
+            {
+                var school = new School
+                {
+                    Name = newSchool.Name.Trim(),
+                    Code = newSchool.Code.Trim(),
+                    Email = newSchool.Email,
+                    Phone = newSchool.Phone,
+                    Address = newSchool.Address,
+                    IsActive = true,
+                    CreatedDate = DateTime.UtcNow,
+                    LastModifiedDate = DateTime.UtcNow
+                };
+                DbContext.Schools.Add(school);
+                await DbContext.SaveChangesAsync();
+
+                newAdmin = new User
+                {
+                    UserName = adminEmail,
+                    Email = adminEmail,
+                    Fullname = newAdminFullname.Trim(),
+                    SchoolId = school.SchoolId,
+                    IsActive = true,
+                    EmailConfirmed = false // verified later via emailed link or "Mark verified"; sign-in not blocked
+                };
+
+                var result = await UserManager.CreateAsync(newAdmin, tempPass);
+                if (result.Succeeded)
+                    result = await UserManager.AddToRoleAsync(newAdmin, "Admin");
+
+                if (!result.Succeeded)
+                {
+                    await transaction.RollbackAsync();
+                    DbContext.ChangeTracker.Clear();
+                    modalError = "Nothing was saved: " + string.Join(", ", result.Errors.Select(e => e.Description));
+                    return;
+                }
+
+                await transaction.CommitAsync();
+            }
+
+            successMessage = $"School \"{newSchool.Name.Trim()}\" created with admin {adminEmail}. Temporary password: {tempPass}";
+
+            // Queued only after commit, so the email background service never sees a row for a rolled-back user.
+            if (sendWelcomeEmail)
+            {
+                try
+                {
+                    var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+                    var sender = await UserManager.GetUserAsync(authState.User);
+                    await AccountEmailService.SendWelcomeAsync(newAdmin, "Admin", Navigation.BaseUri, sender?.Id);
+                    successMessage += " A welcome email has been queued.";
+                }
+                catch (Exception emailEx)
+                {
+                    successMessage += $" (Welcome email could not be queued: {emailEx.Message})";
+                }
+            }
+
+            showSchoolModal = false;
+            await LoadSchools();
+        }
+        catch (Exception ex)
+        {
+            DbContext.ChangeTracker.Clear();
+            modalError = $"Nothing was saved: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
     private async Task SaveSchool()
     {
         errorMessage = string.Empty;
         successMessage = string.Empty;
 
-        if (!ValidateSchoolForm()) return;
+        if (!isEditMode) return; // new schools go through CreateSchoolWithAdmin
 
-        if (string.IsNullOrWhiteSpace(newSchool.Code))
-        { codeError = "School code is required."; return; }
-
-        await ValidateCodeUniqueness();
-        if (codeError != null) return;
+        if (!await ValidateSchoolStep()) return;
 
         try
         {
-            if (isEditMode)
+            var existing = await DbContext.Schools.FindAsync(newSchool.SchoolId);
+            if (existing != null)
             {
-                var existing = await DbContext.Schools.FindAsync(newSchool.SchoolId);
-                if (existing != null)
-                {
-                    existing.Name = newSchool.Name;
-                    existing.Code = newSchool.Code;
-                    existing.Email = newSchool.Email;
-                    existing.Phone = newSchool.Phone;
-                    existing.Address = newSchool.Address;
-                    existing.LastModifiedDate = DateTime.UtcNow;
+                existing.Name = newSchool.Name;
+                existing.Code = newSchool.Code;
+                existing.Email = newSchool.Email;
+                existing.Phone = newSchool.Phone;
+                existing.Address = newSchool.Address;
+                existing.LastModifiedDate = DateTime.UtcNow;
 
-                    DbContext.Schools.Update(existing);
-                    successMessage = "School updated!";
-                }
-            }
-            else
-            {
-                newSchool.CreatedDate = DateTime.UtcNow;
-                newSchool.LastModifiedDate = DateTime.UtcNow;
-                newSchool.IsActive = true;
-                DbContext.Schools.Add(newSchool);
-                successMessage = "School created!";
+                DbContext.Schools.Update(existing);
+                successMessage = "School updated!";
             }
 
             await DbContext.SaveChangesAsync();
