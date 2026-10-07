@@ -94,7 +94,50 @@
         if (!sidebar) return;
         sidebar.classList.toggle('collapsed');
         localStorage.setItem('aris-sidebar-collapsed', sidebar.classList.contains('collapsed'));
+        applyNavGroups();
     }
+
+    // ---- Nav groups (<details class="nav-group">) ----
+    // The group holding the current page is always open; others follow the user's last choice (default closed).
+    // While the sidebar is collapsed to icons every group is forced open so each icon stays reachable.
+    const NAV_GROUPS_KEY = 'aris-nav-groups';
+
+    function readNavGroups() {
+        try { return JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) || '{}') || {}; } catch { return {}; }
+    }
+
+    function applyNavGroups() {
+        const sidebar = document.getElementById('arisSidebar');
+        const rail = !!sidebar && sidebar.classList.contains('collapsed');
+        const stored = readNavGroups();
+        document.querySelectorAll('details.nav-group').forEach(function (d) {
+            const wanted = rail || !!d.querySelector('.nav-item.active') || stored[d.dataset.navGroup] === true;
+            if (d.open !== wanted) d.open = wanted;
+        });
+    }
+
+    // Only toggles that start from the user (click, or Enter/Space which also raise a click) are remembered. Blazor's
+    // page-to-page navigation resets each <details> to the server's state, and applyNavGroups() changes them too;
+    // both raise 'toggle' events that must NOT be saved as choices.
+    document.addEventListener('click', function (e) {
+        const header = e.target.closest ? e.target.closest('summary.nav-group-header') : null;
+        if (header && header.parentElement) header.parentElement.dataset.navUser = '1';
+    }, true);
+
+    // 'toggle' doesn't bubble, so listen in the capture phase.
+    document.addEventListener('toggle', function (e) {
+        const d = e.target;
+        if (!d || !d.matches || !d.matches('details.nav-group')) return;
+        if (!d.dataset.navUser) return;
+        delete d.dataset.navUser;
+        const sidebar = document.getElementById('arisSidebar');
+        if (sidebar && sidebar.classList.contains('collapsed')) return;
+        try {
+            const stored = readNavGroups();
+            stored[d.dataset.navGroup] = d.open;
+            localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(stored));
+        } catch { /* storage unavailable: groups still work, they just aren't remembered */ }
+    }, true);
 
     function toggleAppProfilePanel() {
         const panel = document.getElementById('arisProfilePanel');
@@ -106,10 +149,24 @@
         const collapsed = localStorage.getItem('aris-sidebar-collapsed') === 'true';
         const sidebar = document.getElementById('arisSidebar');
         if (sidebar) sidebar.classList.toggle('collapsed', collapsed);
+        applyNavGroups();
     }
 
     document.addEventListener('DOMContentLoaded', restoreAppSidebarState);
-    document.addEventListener('enhancedload', restoreAppSidebarState);
+
+    // Blazor raises 'enhancedload' on its own `Blazor` object (not on document) after an in-app page-to-page navigation
+    // has patched the DOM. blazor.web.js loads after this inline script, so hook it as soon as it exists.
+    (function hookBlazorNavigation() {
+        let tries = 0;
+        const timer = setInterval(function () {
+            if (window.Blazor && typeof window.Blazor.addEventListener === 'function') {
+                window.Blazor.addEventListener('enhancedload', restoreAppSidebarState);
+                clearInterval(timer);
+            } else if (++tries > 100) {
+                clearInterval(timer);
+            }
+        }, 50);
+    })();
 
     document.addEventListener('click', function (e) {
         const panel = document.getElementById('arisProfilePanel');
@@ -203,7 +260,11 @@
             "admin/users" => "User Management",
             "admin/users/create" => "Create User",
             "admin/subjects" => "Subject Structure",
+            "admin/classes" => "Class Management",
             "admin/enrollment" => "Learner Enrollment",
+            "admin/bulk-enrollment" => "Bulk Allocation",
+            "admin/year-rollover" => "Year Rollover",
+            "admin/previous-years" => "Previous Years",
             "admin/attendance" => "Attendance",
             "admin/messages" => "Parent Communication",
             "admin/email-log" => "Email Log",
@@ -211,6 +272,10 @@
             "teacher/resources" => "Resources",
             "learner/resources" => "Resources",
             "admin/resources" => "Resource Desk",
+            "parent/dashboard" => "Dashboard",
+            var p when p.StartsWith("parent/overview/") => "Overview",
+            var p when p.StartsWith("parent/marks/") => "Marks",
+            var p when p.StartsWith("parent/attendance/") => "Attendance",
             var p when p.StartsWith("parent/resources/") => "Resources",
             "teacher/dashboard" => "Dashboard",
             "teacher/marks" => "Mark Entry",

@@ -12,12 +12,20 @@
 
 @if (!string.IsNullOrEmpty(errorMessage))
 {
-    <div class="alert alert-danger">@errorMessage</div>
+    <div class="alert alert-danger d-flex justify-content-between align-items-center">
+        <span>@errorMessage</span>
+        @* A failed load can always be retried; "not assigned to a school" has no schoolId, so it gets no button. *@
+        @if (schoolId != null && !isLoading)
+        {
+            <button class="btn btn-sm btn-light" @onclick="Retry">Retry</button>
+        }
+    </div>
 }
 
 @if (isLoading)
 {
-    <ProgressPanel Message="Calculating risk across the school..." Done="progressDone" Total="progressTotal" Detail="@progressCurrent" />
+    <ProgressPanel Message="Calculating risk across the school..." Done="progressDone" Total="progressTotal" Detail="@progressCurrent"
+                   SlowHint="Still working. Large schools can take a while." />
 }
 else if (overview != null)
 {
@@ -128,6 +136,7 @@ else if (overview != null)
     private int? selectedGrade;
     private bool isLoading = true;
     private bool started;
+    private bool ready;     // set once OnInitializedAsync has identified the admin's school
     private int? schoolId;
     private string errorMessage = string.Empty;
     private readonly CancellationTokenSource cts = new();
@@ -153,6 +162,7 @@ else if (overview != null)
                 return;
             }
             schoolId = admin.SchoolId;
+            ready = true;
         }
         catch (Exception ex)
         {
@@ -162,9 +172,12 @@ else if (overview != null)
     }
 
     // The page shell paints first; the (cached, parallel) calculation runs on the live circuit only, once.
+    // Do NOT gate this on `firstRender`: Blazor renders at OnInitializedAsync's first incomplete await, so the one render
+    // with firstRender == true can happen BEFORE the school is known, and the load would then never start.
+    // Readiness is what matters; Blazor always re-renders when OnInitializedAsync completes, which re-enters here.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || started || schoolId == null) return;
+        if (started || !ready) return;
         started = true;
         await LoadAsync(refresh: false);
     }
@@ -173,6 +186,12 @@ else if (overview != null)
     {
         if (isLoading || schoolId == null) return;
         await LoadAsync(refresh: true);
+    }
+
+    private async Task Retry()
+    {
+        if (isLoading || schoolId == null) return;
+        await LoadAsync(refresh: false);
     }
 
     private async Task LoadAsync(bool refresh)
@@ -184,6 +203,11 @@ else if (overview != null)
         errorMessage = string.Empty;
         StateHasChanged();
 
+        // An endless spinner is never acceptable: past the time limit the page says so and offers Retry. Page-left
+        // cancellation (cts) and the time limit are told apart below.
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        limit.CancelAfter(RiskOverviewSvc.LoadTimeLimit);
+
         try
         {
             if (refresh) RiskOverviewSvc.InvalidateSchool(schoolId!.Value);
@@ -192,11 +216,15 @@ else if (overview != null)
                 p => { progressDone = p.Done; progressTotal = p.Total; progressCurrent = p.Current; },
                 () => _ = InvokeAsync(StateHasChanged));
 
-            overview = await RiskOverviewSvc.BuildAsync(schoolId!.Value, progress: progress, ct: cts.Token);
+            overview = await RiskOverviewSvc.BuildAsync(schoolId!.Value, progress: progress, ct: limit.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            return; // left the page
         }
         catch (OperationCanceledException)
         {
-            return; // left the page
+            errorMessage = "Calculating risk is taking longer than expected. It is still running in the background; Retry to wait for it.";
         }
         catch (Exception ex)
         {

@@ -1,150 +1,152 @@
 @inject NavigationManager NavigationManager
-@implements IDisposable
 
-<nav class="sidebar-nav">
+@*
+    This component is part of the layout, which renders STATICALLY on the server (Routes/App have no render mode), so
+    it cannot use @onclick. Groups are native <details>/<summary>; remembering open groups and the icon-only sidebar are
+    handled by the small vanilla-JS block in MainLayout.razor. A new page needs an entry here AND in
+    MainLayout.GetPageTitle.
+*@
+
+<nav class="sidebar-nav" aria-label="Main navigation">
     <AuthorizeView Roles="SuperAdmin" Context="superAdminContext">
         <Authorized>
-            <div class="nav-section-label">SuperAdmin</div>
-            <a class="@NavClass("/superadmin/dashboard")" href="/superadmin/dashboard">
-                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
-            </a>
-            <a class="@NavClass("/superadmin/schools")" href="/superadmin/schools">
-                <i class="fas fa-building"></i> <span>Schools</span>
-            </a>
-            <a class="@NavClass("/superadmin/admins")" href="/superadmin/admins">
-                <i class="fas fa-users"></i> <span>Staff Registry</span>
-            </a>
+            @foreach (var node in SuperAdminMenu) { @RenderNode(node) }
         </Authorized>
     </AuthorizeView>
 
     <AuthorizeView Roles="Admin" Context="adminContext">
         <Authorized>
-            <div class="nav-section-label">Admin</div>
-            <a class="@NavClass("/admin/dashboard")" href="/admin/dashboard">
-                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
-            </a>
-            <a class="@NavClass("/admin/risk-overview")" href="/admin/risk-overview">
-                <i class="fas fa-chart-pie"></i> <span>Risk Overview</span>
-            </a>
-            <a class="@NavClass("/admin/users")" href="/admin/users">
-                <i class="fas fa-users"></i> <span>User Management</span>
-            </a>
-            <a class="@NavClass("/admin/users/create")" href="/admin/users/create">
-                <i class="fas fa-user-plus"></i> <span>Create User</span>
-            </a>
-            <a class="@NavClass("/admin/subjects")" href="/admin/subjects">
-                <i class="fas fa-sitemap"></i> <span>Subject Structure</span>
-            </a>
-            <a class="@NavClass("/admin/classes")" href="/admin/classes">
-                <i class="fas fa-chalkboard"></i> <span>Class Management</span>
-            </a>
-            <a class="@NavClass("/admin/enrollment")" href="/admin/enrollment">
-                <i class="fas fa-user-graduate"></i> <span>Learner Enrollment</span>
-            </a>
-            <a class="@NavClass("/admin/bulk-enrollment")" href="/admin/bulk-enrollment">
-                <i class="fas fa-layer-group"></i> <span>Bulk Allocation</span>
-            </a>
-            <a class="@NavClass("/admin/attendance")" href="/admin/attendance">
-                <i class="fas fa-calendar-check"></i> <span>Attendance</span>
-            </a>
-            <a class="@NavClass("/admin/year-rollover")" href="/admin/year-rollover">
-                <i class="fas fa-forward"></i> <span>Year Rollover</span>
-            </a>
-            <a class="@NavClass("/admin/previous-years")" href="/admin/previous-years">
-                <i class="fas fa-box-archive"></i> <span>Previous Years</span>
-            </a>
-            <a class="@NavClass("/admin/resources")" href="/admin/resources">
-                <i class="fas fa-folder-open"></i> <span>Resource Desk</span>
-            </a>
-            <a class="@NavClass("/admin/messages")" href="/admin/messages">
-                <i class="fas fa-envelope"></i> <span>Parent Communication</span>
-            </a>
-            <a class="@NavClass("/admin/email-log")" href="/admin/email-log">
-                <i class="fas fa-list-check"></i> <span>Email Log</span>
-            </a>
+            @foreach (var node in AdminMenu) { @RenderNode(node) }
         </Authorized>
     </AuthorizeView>
 
     <AuthorizeView Roles="Teacher" Context="teacherContext">
         <Authorized>
-            <div class="nav-section-label">Teacher</div>
-            <a class="@NavClass("/teacher/dashboard")" href="/teacher/dashboard">
-                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
-            </a>
-            <a class="@NavClass("/teacher/marks")" href="/teacher/marks">
-                <i class="fas fa-pen-ruler"></i> <span>Mark Entry</span>
-            </a>
-            <a class="@NavClass("/teacher/atrisk")" href="/teacher/atrisk">
-                <i class="fas fa-exclamation-triangle"></i> <span>Risk &amp; Interventions</span>
-            </a>
-            <a class="@NavClass("/teacher/attendance")" href="/teacher/attendance">
-                <i class="fas fa-calendar-check"></i> <span>Attendance</span>
-            </a>
-            <a class="@NavClass("/teacher/learnerprofiles")" href="/teacher/learnerprofiles">
-                <i class="fas fa-id-card"></i> <span>Learner Profiles</span>
-            </a>
-            <a class="@NavClass("/teacher/resources")" href="/teacher/resources">
-                <i class="fas fa-folder-open"></i> <span>Resources</span>
-            </a>
-            <a class="@NavClass("/teacher/messages")" href="/teacher/messages">
-                <i class="fas fa-envelope"></i> <span>Message Parents</span>
-            </a>
+            @foreach (var node in TeacherMenu) { @RenderNode(node) }
         </Authorized>
     </AuthorizeView>
 
     <AuthorizeView Roles="Learner" Context="learnerContext">
         <Authorized>
-            <div class="nav-section-label">Learner</div>
-            <a class="@NavClass("/learner/dashboard")" href="/learner/dashboard">
-                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
-            </a>
-            <a class="@NavClass("/learner/marks")" href="/learner/marks">
-                <i class="fas fa-chart-pie"></i> <span>Marks</span>
-            </a>
-            <a class="@NavClass("/learner/attendance")" href="/learner/attendance">
-                <i class="fas fa-calendar-check"></i> <span>Attendance</span>
-            </a>
-            <a class="@NavClass("/learner/resources")" href="/learner/resources">
-                <i class="fas fa-folder-open"></i> <span>Resources</span>
-            </a>
+            @foreach (var node in LearnerMenu) { @RenderNode(node) }
         </Authorized>
     </AuthorizeView>
 
     <AuthorizeView Roles="Parent" Context="parentContext">
         <Authorized>
-            <div class="nav-section-label">Parent</div>
-            <a class="@NavClass("/parent/dashboard")" href="/parent/dashboard">
-                <i class="fas fa-chart-line"></i> <span>Dashboard</span>
-            </a>
+            @foreach (var node in ParentMenu) { @RenderNode(node) }
         </Authorized>
     </AuthorizeView>
 </nav>
 
 @code {
-    private string currentPath = "";
+    // A leaf has an Href; a group has an Id and Children. `Also` lists extra paths that should highlight the item:
+    // an entry ending in "/" is a prefix match, anything else is an exact path.
+    private sealed record NavNode(string Label, string Icon, string? Href = null, string[]? Also = null,
+        string? Id = null, NavNode[]? Children = null);
 
-    protected override void OnInitialized()
+    private static NavNode Link(string label, string icon, string href, params string[] also) =>
+        new(label, icon, Href: href, Also: also);
+
+    private static NavNode Group(string id, string label, string icon, params NavNode[] children) =>
+        new(label, icon, Id: id, Children: children);
+
+    private static readonly NavNode[] SuperAdminMenu =
     {
-        currentPath = "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?')[0].TrimEnd('/');
-        NavigationManager.LocationChanged += OnLocationChanged;
+        Link("Dashboard", "fa-chart-line", "/superadmin/dashboard"),
+        Link("Schools", "fa-building", "/superadmin/schools"),
+        Link("Staff Registry", "fa-users", "/superadmin/admins"),
+    };
+
+    private static readonly NavNode[] AdminMenu =
+    {
+        Link("Dashboard", "fa-chart-line", "/admin/dashboard"),
+        // Admins reach the risk report and (to drill into a subject) the shared at-risk page from here.
+        Link("Risk Overview", "fa-chart-pie", "/admin/risk-overview", "/admin/risk-report", "/teacher/atrisk"),
+        Link("Attendance", "fa-calendar-check", "/admin/attendance"),
+        Group("people", "People", "fa-users",
+            Link("User Management", "fa-users", "/admin/users"),
+            Link("Create User", "fa-user-plus", "/admin/users/create"),
+            Link("Learner Profiles", "fa-id-card", "/teacher/learnerprofiles")),
+        Group("classes", "Classes & Learners", "fa-user-graduate",
+            Link("Class Management", "fa-chalkboard", "/admin/classes"),
+            Link("Learner Enrollment", "fa-user-graduate", "/admin/enrollment"),
+            Link("Bulk Allocation", "fa-layer-group", "/admin/bulk-enrollment")),
+        Group("curriculum", "Curriculum", "fa-book",
+            Link("Subject Structure", "fa-sitemap", "/admin/subjects"),
+            Link("Resource Desk", "fa-folder-open", "/admin/resources")),
+        Group("communication", "Communication", "fa-envelope",
+            Link("Parent Communication", "fa-envelope", "/admin/messages"),
+            Link("Email Log", "fa-list-check", "/admin/email-log")),
+        Group("yearend", "Year-End", "fa-forward",
+            Link("Year Rollover", "fa-forward", "/admin/year-rollover"),
+            Link("Previous Years", "fa-box-archive", "/admin/previous-years")),
+    };
+
+    private static readonly NavNode[] TeacherMenu =
+    {
+        Link("Dashboard", "fa-chart-line", "/teacher/dashboard"),
+        Group("teaching", "Teaching", "fa-chalkboard-user",
+            Link("Mark Entry", "fa-pen-ruler", "/teacher/marks"),
+            Link("Attendance", "fa-calendar-check", "/teacher/attendance"),
+            Link("Resources", "fa-folder-open", "/teacher/resources")),
+        Group("learners", "Learners", "fa-user-graduate",
+            Link("Risk & Interventions", "fa-exclamation-triangle", "/teacher/atrisk"),
+            Link("Learner Profiles", "fa-id-card", "/teacher/learnerprofiles")),
+        Link("Message Parents", "fa-envelope", "/teacher/messages"),
+    };
+
+    private static readonly NavNode[] LearnerMenu =
+    {
+        Link("Dashboard", "fa-chart-line", "/learner/dashboard"),
+        Link("Marks", "fa-chart-pie", "/learner/marks"),
+        Link("Attendance", "fa-calendar-check", "/learner/attendance"),
+        Link("Resources", "fa-folder-open", "/learner/resources"),
+    };
+
+    private static readonly NavNode[] ParentMenu =
+    {
+        // Every per-child page (/parent/marks/{id}, attendance, overview, resources) belongs to the dashboard.
+        Link("Dashboard", "fa-chart-line", "/parent/dashboard", "/parent/"),
+    };
+
+    // Computed per render; the layout is re-rendered by the server on every navigation, so this is always current.
+    private string CurrentPath =>
+        "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', '#')[0].TrimEnd('/');
+
+    private bool IsActive(NavNode node)
+    {
+        if (node.Href is null) return false;
+        var path = CurrentPath;
+        if (path.Equals(node.Href.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)) return true;
+        return node.Also?.Any(a => a.EndsWith('/')
+            ? path.StartsWith(a, StringComparison.OrdinalIgnoreCase)
+            : path.Equals(a.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)) == true;
     }
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        currentPath = "/" + NavigationManager.ToBaseRelativePath(e.Location).Split('?')[0].TrimEnd('/');
-        StateHasChanged();
-    }
+    private RenderFragment RenderNode(NavNode node) => node.Children is null ? RenderLink(node, false) : RenderGroup(node);
 
-    private string NavClass(string href)
-    {
-        var normalizedHref = href.TrimEnd('/');
-        return currentPath.Equals(normalizedHref, StringComparison.OrdinalIgnoreCase)
-            ? "nav-item active"
-            : "nav-item";
-    }
+    private RenderFragment RenderLink(NavNode node, bool nested) =>
+        @<a class="@("nav-item" + (nested ? " nav-sub" : "") + (IsActive(node) ? " active" : ""))"
+            href="@node.Href" title="@node.Label" aria-current="@(IsActive(node) ? "page" : null)">
+            <i class="fas @node.Icon"></i> <span>@node.Label</span>
+        </a>;
 
-    public void Dispose()
+    // The group holding the current page is rendered open (and marked) so you always see where you are.
+    private RenderFragment RenderGroup(NavNode group)
     {
-        NavigationManager.LocationChanged -= OnLocationChanged;
+        var hasActive = group.Children!.Any(IsActive);
+        return @<details class="nav-group" data-nav-group="@group.Id" open="@hasActive">
+            <summary class="@("nav-item nav-group-header" + (hasActive ? " has-active" : ""))" title="@group.Label">
+                <i class="fas @group.Icon"></i> <span>@group.Label</span>
+                <i class="fas fa-chevron-down nav-chevron" aria-hidden="true"></i>
+            </summary>
+            <div class="nav-group-items">
+                @foreach (var child in group.Children!)
+                {
+                    @RenderLink(child, true)
+                }
+            </div>
+        </details>;
     }
 }

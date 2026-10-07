@@ -130,7 +130,8 @@ else
                     @if (isGenerating)
                     {
                         <div class="p-3">
-                            <ProgressPanel Message="@stageMessage" Done="stageDone" Total="stageTotal" Detail="@stageDetail" />
+                            <ProgressPanel Message="@stageMessage" Done="stageDone" Total="stageTotal" Detail="@stageDetail"
+                                           SlowHint="Still working. Large schools can take a while." />
                         </div>
                     }
                     else if (!hasPreview)
@@ -303,9 +304,14 @@ else
                 p => { stageDone = p.Done; stageTotal = p.Total; stageDetail = p.Current ?? stageDetail; },
                 () => _ = InvokeAsync(StateHasChanged));
 
+            // Stage 1 can't wait forever (every button is disabled while generating). Leaving the page (token) and the
+            // time limit are told apart in the catch blocks below; the PDF stage only follows the page token.
+            using var dataLimit = CancellationTokenSource.CreateLinkedTokenSource(token);
+            dataLimit.CancelAfter(RiskOverviewSvc.LoadTimeLimit);
+
             var swData = Stopwatch.StartNew();
             var overview = await RiskOverviewSvc.BuildAsync(schoolId, grade: grade, subjectId: subjectId,
-                includeLearnerNames: snapNames, progress: progress, ct: token);
+                includeLearnerNames: snapNames, progress: progress, ct: dataLimit.Token);
             swData.Stop();
 
             stageMessage = "Step 2 of 3 - Building the PDF";
@@ -347,9 +353,13 @@ else
                        $"{overview.SubjectsComputed} calculated, {overview.SubjectsFromCache} reused; PDF {swPdf.Elapsed.TotalSeconds:0.0} s). " +
                        $"Data as of {overview.AsOfUtc.ToLocalTime():HH:mm}.";
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             // Left the page while generating; nothing to show.
+        }
+        catch (OperationCanceledException)
+        {
+            errorMessage = "Gathering risk data is taking longer than expected. It is still running in the background; click Update preview to try again.";
         }
         catch (JSDisconnectedException)
         {

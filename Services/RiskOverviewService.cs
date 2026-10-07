@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using ARIS1.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -119,6 +120,10 @@ namespace ARIS1.Services
         private readonly TimeSpan _cacheDuration;
         private readonly int _maxParallelism;
 
+        // How long a page waits for BuildAsync before it stops waiting and says so (the calculation itself keeps running
+        // and is reused). Shared by the Admin Dashboard banner, the Risk Overview and the report's data stage.
+        public TimeSpan LoadTimeLimit { get; }
+
         // One token per school: cancelling it evicts every cached subject of that school at once.
         private static readonly ConcurrentDictionary<int, CancellationTokenSource> SchoolTokens = new();
         private static readonly object CreateLock = new();
@@ -136,14 +141,15 @@ namespace ARIS1.Services
             _log = log;
             _cacheDuration = TimeSpan.FromMinutes(Math.Max(0.01, config.GetValue("Risk:CacheMinutes", 10.0)));
             _maxParallelism = Math.Max(1, config.GetValue("Risk:MaxParallelism", Math.Min(4, Environment.ProcessorCount)));
+            LoadTimeLimit = TimeSpan.FromSeconds(Math.Max(1, config.GetValue("Risk:LoadTimeoutSeconds", 120)));
         }
 
         private sealed record SubjectInfo(int SubjectId, string Name, int Grade, string TeacherName, int SchoolId);
 
         // Current academic year for a school: same resolution as YearRolloverService.ResolveYearsAsync and the Teacher pages.
-        public async Task<int> ResolveCurrentYearAsync(int schoolId) =>
+        public async Task<int> ResolveCurrentYearAsync(int schoolId, CancellationToken ct = default) =>
             await _db.Subjects.Where(s => s.SchoolId == schoolId)
-                .Select(s => (int?)s.AcademicYear).MaxAsync() ?? DateTime.Now.Year;
+                .Select(s => (int?)s.AcademicYear).MaxAsync(ct) ?? DateTime.Now.Year;
 
         // Cache control -------------------------------------------------------------------------------------------
 
@@ -162,12 +168,44 @@ namespace ARIS1.Services
             int? subjectId = null, bool includeLearnerNames = false, bool useCache = true,
             IProgress<RiskBuildProgress>? progress = null, CancellationToken ct = default)
         {
+            // One log line per call, whatever the outcome, so "why is the overview slow / stuck?" can be answered from the
+            // log. A call that never completes (the case that matters) is logged when the caller stops waiting.
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                var overview = await BuildCoreAsync(schoolId, teacherId, grade, subjectId, includeLearnerNames, useCache, progress, ct);
+                _log.Log(SlowLevel(sw),
+                    "Risk overview for school {SchoolId}: {Subjects} subjects, {Computed} calculated, {Cached} from cache, in {Elapsed} ms",
+                    schoolId, overview.Subjects.Count, overview.SubjectsComputed, overview.SubjectsFromCache, sw.ElapsedMilliseconds);
+                return overview;
+            }
+            catch (OperationCanceledException)
+            {
+                // The caller left the page or hit its time limit; the shared calculation itself carries on.
+                _log.Log(SlowLevel(sw), "Risk overview for school {SchoolId}: caller stopped waiting after {Elapsed} ms",
+                    schoolId, sw.ElapsedMilliseconds);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Risk overview for school {SchoolId} failed after {Elapsed} ms", schoolId, sw.ElapsedMilliseconds);
+                throw;
+            }
+        }
+
+        private static LogLevel SlowLevel(Stopwatch sw) =>
+            sw.Elapsed > TimeSpan.FromSeconds(10) ? LogLevel.Warning : LogLevel.Information;
+
+        private async Task<SchoolRiskOverview> BuildCoreAsync(int schoolId, int? teacherId, int? grade,
+            int? subjectId, bool includeLearnerNames, bool useCache,
+            IProgress<RiskBuildProgress>? progress, CancellationToken ct)
+        {
             var school = await _db.Schools.AsNoTracking()
                 .Where(s => s.SchoolId == schoolId)
                 .Select(s => new { s.Name, s.Code })
                 .FirstOrDefaultAsync(ct);
 
-            var year = await ResolveCurrentYearAsync(schoolId);
+            var year = await ResolveCurrentYearAsync(schoolId, ct);
             var overview = new SchoolRiskOverview
             {
                 SchoolId = schoolId,

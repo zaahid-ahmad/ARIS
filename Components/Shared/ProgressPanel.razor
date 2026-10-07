@@ -8,6 +8,10 @@
     <div class="d-flex align-items-center gap-2 text-muted mb-3" role="status" aria-live="polite">
         <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
         <span>@Message@(Elapsed >= 2 ? $" ({Elapsed}s)" : "")</span>
+        @if (Elapsed >= SlowAfterSeconds && !string.IsNullOrEmpty(SlowHint))
+        {
+            <small class="text-warning">@SlowHint</small>
+        }
     </div>
 }
 else
@@ -37,6 +41,10 @@ else
                     <small class="text-muted">@Detail</small>
                 }
             }
+            @if (Elapsed >= SlowAfterSeconds && !string.IsNullOrEmpty(SlowHint))
+            {
+                <small class="text-warning d-block mt-1">@SlowHint</small>
+            }
         </div>
     </div>
 }
@@ -47,6 +55,9 @@ else
     [Parameter] public int Done { get; set; }
     [Parameter] public int Total { get; set; }
     [Parameter] public bool Compact { get; set; }
+    // Shown once the work has been running for SlowAfterSeconds, so a long wait is acknowledged rather than silent.
+    [Parameter] public string? SlowHint { get; set; }
+    [Parameter] public int SlowAfterSeconds { get; set; } = 20;
 
     private readonly DateTime started = DateTime.UtcNow;
     private Timer? timer;

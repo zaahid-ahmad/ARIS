@@ -502,12 +502,96 @@ body {
         color: var(--blue);
     }
 
-;
-
 .nav-item.active {
     background: var(--blue-light);
     color: var(--blue);
     border: 1.5px solid var(--blue);
+}
+
+/* app.css colours every <a> that isn't a .btn/.nav-link as a content link, and out-ranks .nav-item. Restore the intended
+   nav colours (dark text; blue on hover and for the current page) so links and group headers look the same. */
+.sidebar .sidebar-nav a.nav-item:not(.btn) {
+    color: var(--ink-2);
+}
+
+    .sidebar .sidebar-nav a.nav-item:not(.btn):hover,
+    .sidebar .sidebar-nav a.nav-item.active:not(.btn) {
+        color: var(--blue);
+    }
+
+/* ─── NAV GROUPS ───
+   Native <details> (the layout renders statically, so no C# handlers). MainLayout.razor's script remembers which groups
+   are open and forces them all open while the sidebar is collapsed to icons. */
+.nav-group {
+    margin-bottom: 2px;
+}
+
+    .nav-group > summary {
+        list-style: none;
+        cursor: pointer;
+        user-select: none;
+    }
+
+        .nav-group > summary::-webkit-details-marker {
+            display: none;
+        }
+
+.nav-group-header .nav-chevron {
+    margin-left: auto;
+    width: auto;
+    font-size: 0.65rem;
+    color: var(--ink-4);
+    transition: transform 0.2s;
+}
+
+.nav-group[open] > .nav-group-header .nav-chevron {
+    transform: rotate(180deg);
+}
+
+/* A closed group that contains the current page still says so. */
+.nav-group-header.has-active {
+    color: var(--blue);
+    font-weight: 600;
+}
+
+.nav-item:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 1px;
+}
+
+.nav-group-items {
+    margin: 2px 0 4px 18px;
+    padding-left: 8px;
+    border-left: 1.5px solid var(--border);
+}
+
+.nav-item.nav-sub {
+    font-size: 0.85rem;
+    padding: 7px 10px;
+}
+
+/* Icon-only sidebar: no group headers, every link is an icon, and a thin rule separates the groups. */
+.sidebar.collapsed .nav-group-header {
+    display: none;
+}
+
+.sidebar.collapsed .nav-group-items {
+    margin: 0;
+    padding-left: 0;
+    border-left: none;
+}
+
+.sidebar.collapsed .nav-item.nav-sub {
+    font-size: 0.9rem;
+    padding: 9px 10px;
+}
+
+.sidebar.collapsed .nav-item + .nav-group,
+.sidebar.collapsed .nav-group + .nav-group,
+.sidebar.collapsed .nav-group + .nav-item {
+    border-top: 1px solid var(--border);
+    margin-top: 6px;
+    padding-top: 6px;
 }
 
 .nav-item .badge-pill {

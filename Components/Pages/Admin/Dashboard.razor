@@ -7,6 +7,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
 @inject ARIS1.Services.RiskOverviewService RiskOverviewSvc
+@inject ILogger<Dashboard> Logger
 @implements IDisposable
 @rendermode InteractiveServer
 
@@ -14,7 +15,16 @@
 
 @if (isLoadingRisk)
 {
-    <ProgressPanel Compact="true" Message="Checking learners..." />
+    <ProgressPanel Compact="true" Message="Checking learners..." SlowHint="Still working. Large schools can take a while." />
+}
+else if (riskTimedOut)
+{
+    <div class="alert alert-warning d-flex justify-content-between align-items-center"
+         style="cursor: pointer;"
+         @onclick='() => Navigation.NavigateTo("/admin/risk-overview")'>
+        <span>The school-wide risk summary is taking longer than expected.</span>
+        <span class="badge bg-light text-dark">View Risk Overview →</span>
+    </div>
 }
 else if (riskTotal != null)
 {
@@ -111,7 +121,9 @@ else if (riskTotal != null)
     private ARIS1.Services.RiskAggregate? riskTotal;
     private string riskAsOf = string.Empty;
     private bool isLoadingRisk = true;
+    private bool riskTimedOut;
     private bool riskStarted;
+    private bool ready; // set once OnInitializedAsync has identified the admin
     private readonly CancellationTokenSource cts = new();
 
     protected override async Task OnInitializedAsync()
@@ -120,31 +132,44 @@ else if (riskTotal != null)
         var user = authState.User;
         if (user.Identity?.IsAuthenticated == true)
             currentUser = await UserManager.FindByNameAsync(user.Identity.Name!);
+        ready = true;
     }
 
     // The at-risk banner needs a school-wide calculation, so it loads AFTER the dashboard has painted (and only once,
     // on the live circuit — OnAfterRender doesn't run during prerender). Signing in never waits on it.
+    // Gate on readiness, NOT on `firstRender`: Blazor renders at OnInitializedAsync's first incomplete await, so the one
+    // render with firstRender == true can come before currentUser is known and the banner would silently never load.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || riskStarted) return;
+        if (riskStarted || !ready) return;
         riskStarted = true;
+
+        // The banner must never spin forever: past the time limit it says so and points to the Risk Overview instead.
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        limit.CancelAfter(RiskOverviewSvc.LoadTimeLimit);
 
         try
         {
             if (currentUser?.SchoolId is int schoolId)
             {
-                var overview = await RiskOverviewSvc.BuildAsync(schoolId, ct: cts.Token);
+                var overview = await RiskOverviewSvc.BuildAsync(schoolId, ct: limit.Token);
                 riskTotal = overview.Total;
                 riskAsOf = overview.AsOfUtc.ToLocalTime().ToString("HH:mm");
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             return; // left the page; nothing to show
         }
-        catch
+        catch (OperationCanceledException)
         {
-            // The banner is a convenience; a failure must not break the dashboard itself.
+            Logger.LogWarning("Admin dashboard risk banner gave up after {Seconds} s", RiskOverviewSvc.LoadTimeLimit.TotalSeconds);
+            riskTimedOut = true;
+        }
+        catch (Exception ex)
+        {
+            // The banner is a convenience; a failure must not break the dashboard itself, but it must be findable.
+            Logger.LogWarning(ex, "Admin dashboard risk banner failed to load");
             riskTotal = null;
         }
 
